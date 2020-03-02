@@ -7,6 +7,8 @@ from typing import Tuple
 
 from alpha.base import DataFetcher
 
+class FmpError(Exception):
+    pass
 
 class FmpDataFetcher(DataFetcher):
     """
@@ -40,6 +42,8 @@ class FmpDataFetcher(DataFetcher):
         raw_dfs = {}
         for statement in statements:
             data = json.loads(self._load_resource(urls[statement]))
+            if not data: raise FmpError("no data was returned")
+
             raw_dfs[statement] = pd.DataFrame(data['financials'])
             df = raw_dfs[statement]
             df.set_index('date', inplace=True)
@@ -70,6 +74,7 @@ class FmpDataFetcher(DataFetcher):
     def stock_data(self) -> pd.DataFrame:
         url = f"{self._BASE_URL}/historical-price-full/{self._symb}?from={self._year_start}&to={self._year_end + 1}"
         data = json.loads(self._load_resource(url))
+        if not data: raise FmpError("no data was returned")
 
         df = pd.DataFrame(data['historical']).filter(items=('date', 'high', 'low'))
         df.set_index('date', inplace=True)
