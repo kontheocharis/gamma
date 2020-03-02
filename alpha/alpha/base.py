@@ -29,10 +29,10 @@ class DataFetcher(ABC):
     @abstractmethod
     def financial_data(self) -> pd.DataFrame:
         """
-        Gets quarterly financial data of company.
+        Gets yearly financial data of company.
 
         :returns: a date-indexed `pd.DataFrame` with columns
-        `self.FINANCIAL_COLUMNS` and quarterly data points.
+        `self.FINANCIAL_COLUMNS` and yearly data points.
         """
         pass
 
