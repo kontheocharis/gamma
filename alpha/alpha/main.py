@@ -5,6 +5,7 @@ from abc import ABC
 from typing import final, List
 from dataclasses import dataclass
 
+
 class DataFetcher(ABC):
     """
     An interface to fetch the exact data that is needed for calculating certain
@@ -48,35 +49,6 @@ class DataFetcher(ABC):
         """
         pass
 
-# *Step 1*: Find and import data using stockrow.com
-# *Step 2*: Select data that we will use to calculate metrics to screen
-# equities
-# *Step 3*: Run the stocks and data through an algorithm that will give us an
-# output - either 1 or 0
-
-# *Algorithm*
-#    1. CNAV1 share price has to be less than NAV share price
-#    2. P/E ratio of less than 10
-#    3. Operating cashflow over the past 3 years has to be positive
-#    4. Debt-to-equity ratio of less than 100% or 1
-#    5. Potential ROI of 100% or more (= NAV / current share price -1)
-#    6. % of insider ownership is over 60%
-#    7. Market capitalisation is a minimum of $1 Billion
-
-# *Variables / data that will be needed*
-#    - Current share price -> yahoo_stock_file
-#    - Share price from 3 years ago -> yahoo_stock_file
-#    - Range of max share prices over a period of 3 years -> yahoo_stock_file
-#    - Total assets -> stockrow_balancesheet_file
-#    - Investment properties -> stockrow_balancesheet_file
-#    - Cash and cash equivalents -> stockrow_balancesheet_file
-#    - Land / property -> stockrow_balancesheet_file
-#    - Total liabilities -> stockrow_balancesheet_file
-#    - Total outstanding shares -> stockrow_balancesheet_file
-#    - Operating cashflow over the past 3 years -> stockrow_cashflow_file
-#    - Total debt -> stockrow_balancesheet_file
-#    - Total equity -> stockrow_balancesheet_file
-#    - % of insider ownership
 
 @dataclass
 class StockRowYahooFiles:
@@ -92,11 +64,9 @@ class StockRowYahooFetcher(DataFetcher):
         self._files = files
 
     def financial_data(self) -> pd.DataFrame:
-
-
         df = pd.read_excel(self._financial_file, index_col=[0]).transpose()
         df = df.filter()
-
+        return df
 
     def stock_data(self) -> pd.DataFrame:
         pass
