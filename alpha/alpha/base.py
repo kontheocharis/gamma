@@ -19,9 +19,7 @@ class DataFetcher(ABC):
         'total_liabilities',
         'total_shareholders_equity',
         'total_debt',
-        'operating_cashflow_y0',
-        'operating_cashflow_y1',
-        'operating_cashflow_y2',
+        'operating_cashflow',
     )
 
     STOCK_COLUMNS: Final = ('high', 'low')
