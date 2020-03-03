@@ -5,6 +5,7 @@ import requests
 
 
 # IMPORTANT VARIABLES TO NOTE
+# Used function decorators to use the variable outside the function
 
 # analysing_share_price.buy_share_price
 # analysing_share_price.sell_share_price
@@ -33,7 +34,6 @@ def analysing_share_price(URL, buy_date, sell_date, goal_of_return_during_period
             sell_date_index = i
 
 
-    # Had to use a function decorator to use the variable outside the function
     analysing_share_price.buy_share_price = df_share_price["close"].iloc[buy_date_index]  # Buy price in 2016
     analysing_share_price.sell_share_price = df_share_price["close"].iloc[sell_date_index]    # Sell price 3 years later in 2019
 

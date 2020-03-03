@@ -12,6 +12,7 @@ year_2014 = 5
 
 
 # IMPORTANT VARIABLES TO NOTE
+# Used function decorators to use the variable outside the function
 
 # analysing_statements.eps_2016
 # analysing_statements.total_outstanding_shares_2016
