@@ -23,7 +23,6 @@ def analysing_share_price(URL, buy_date, sell_date, goal_of_return_during_period
     # .loc['row_name'] to select rows
     # df['col_name'] to select columns
 
-
     for i in range(len(df_share_price)):
         if df_share_price["date"].iloc[i] == buy_date:
             buy_date_index = i

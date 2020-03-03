@@ -39,5 +39,5 @@ if cnav1 < nav and pe_ratio < 10 and operating_cashflow_2016 > 0 and operating_c
     print("The CNAV value investing algorithm states that we should invest in " + str(string_interpolation.ticker) + "! Based on historic data, your buy price would be " + str(analysing_share_price.buy_share_price) + " and the price of a 100% gain, you would sell it at during the period of 3 years would have been " + str(analysing_share_price.sell_share_price_of_100_gain))
 
 else: 
-    print("The CNAV value investing algorithm states that we should not invest in " + str(string_interpolation.ticker) + "! However, based on historic data, your buy price would be " + str(analysing_share_price.buy_share_price) + " and the price at 100% gain, you would sell it at during the period of 3 years would have been " + str(analysing_share_price.sell_share_price_of_100_gain))
+    print("The CNAV value investing algorithm states that we should not invest in " + str(string_interpolation.ticker) + "! However, based on historic data, if you did, your buy price would be " + str(analysing_share_price.buy_share_price) + " and the price at 100% gain, you would sell it at during the period of 3 years would have been " + str(analysing_share_price.sell_share_price_of_100_gain))
 
