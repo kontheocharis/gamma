@@ -49,17 +49,16 @@ class FmpDataFetcher(DataFetcher):
             df.set_index('date', inplace=True)
             df.index.name = None
             df.index = pd.to_datetime(df.index)
-            df = df.loc[str(self._year_end + 1):str(self._year_start)]
 
         ics = raw_dfs['income-statement']
         bls = raw_dfs['balance-sheet-statement']
         cfs = raw_dfs['cash-flow-statement']
 
         mappings = {
-            # 'total_outstanding_shares':    ,
+            'total_outstanding_shares':    ics['Weighted Average Shs Out'],
             'eps':                         ics['EPS'],
             'cash_short_term_investments': bls['Cash and short-term investments'],
-            'property_plant_equipment':    bls['Property, Plant & Equipment Net'],
+            'ppe':                         bls['Property, Plant & Equipment Net'],
             'total_assets':                bls['Total assets'],
             'total_liabilities':           bls['Total liabilities'],
             'total_shareholders_equity':   bls['Total shareholders equity'],
@@ -68,6 +67,8 @@ class FmpDataFetcher(DataFetcher):
         }
 
         df = pd.DataFrame(mappings, copy=False)
+        df = df.apply(pd.to_numeric, errors='raise')
+        df = df.loc[str(self._year_end):str(self._year_start)]
         return df
 
 
@@ -80,6 +81,7 @@ class FmpDataFetcher(DataFetcher):
         df.set_index('date', inplace=True)
         df.index.name = None
         df.index = pd.to_datetime(df.index)
+        df = df.apply(pd.to_numeric, errors='raise')
         return df
 
 

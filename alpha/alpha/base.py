@@ -14,7 +14,7 @@ class DataFetcher(ABC):
         'total_outstanding_shares',
         'eps',
         'cash_short_term_investments',
-        'property_plant_equipment',
+        'ppe',
         'total_assets',
         'total_liabilities',
         'total_shareholders_equity',
