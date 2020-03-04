@@ -3,7 +3,7 @@ import requests
 import os
 import hashlib
 import json
-from typing import Tuple, Option
+from typing import Tuple, Optional
 from enum import Enum
 
 from alpha.base import DataFetcher
@@ -45,7 +45,7 @@ class FmpDataFetcher(DataFetcher):
     _year_start: int
     _year_end: int
     _symb: str
-    _data_folder: Option[str]
+    _data_folder: Optional[str]
 
     _BASE_URL = 'https://financialmodelingprep.com/api/v3'
     _CACHE_LOCATION = os.path.join(os.path.dirname(__file__), '../cache/')
@@ -53,7 +53,7 @@ class FmpDataFetcher(DataFetcher):
     _FINANCIAL_COMP = "financials/{}/{}"
     _SHARE_COMP = "historical-price-full/{}?from={}&to={}"
 
-    def __init__(self, company_symbol: str, year_range: Tuple[int, int], data_folder: Option[str] = None):
+    def __init__(self, company_symbol: str, year_range: Tuple[int, int], data_folder: Optional[str] = None):
         self._year_start, self._year_end = year_range
         self._symb = company_symbol
         self._data_folder = data_folder
@@ -67,6 +67,7 @@ class FmpDataFetcher(DataFetcher):
             data = json.loads(self._load_resource(statement))
             if not data: raise FmpError(f"no {statement.to_string()} data for {self._symb}")
             raw_dfs[statement] = pd.DataFrame(data['financials'])
+            raw_dfs[statement].set_index('date', inplace=True)
 
         ics = raw_dfs[Statement.INCOME_STATEMENT]
         bls = raw_dfs[Statement.BALANCE_SHEET]
@@ -85,6 +86,7 @@ class FmpDataFetcher(DataFetcher):
         }
 
         df = pd.DataFrame(mappings, copy=False)
+
         df = self._format_df(df)
         return df
 
@@ -94,21 +96,23 @@ class FmpDataFetcher(DataFetcher):
         if not data: raise FmpError(f"no {statement.to_string()} data for {self._symb}")
 
         df = pd.DataFrame(data['historical']).filter(items=('date', 'high', 'low'))
+        df.set_index('date', inplace=True)
+
         df = self._format_df(df)
         return df
 
 
-    def _format_df(df: pd.DataFrame) -> pd.DataFrame:
+    def _format_df(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Gets `df` in the right format, including parsing indices and values,
         and limiting to applicable dates.
         """
 
-        df.set_index('date', inplace=True)
         df.index.name = None
         df.index = pd.to_datetime(df.index)
         df = df.apply(pd.to_numeric, errors='raise')
-        df = df.loc[str(self._year_end):str(self._year_start)]
+        df.sort_index(inplace=True)
+        df = df.loc[str(self._year_start):str(self._year_end)]
         return df
 
 
