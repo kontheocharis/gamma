@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Dict
 
 statements = ('balance-sheet-statement', 'income-statement', 'cash-flow-statement')
+jobs = 8
 
 def get_links() -> Dict[str, str]:
     links: str
@@ -24,19 +25,15 @@ def get_links() -> Dict[str, str]:
 
     for statement in statements:
         root_url = f"https://financialmodelingprep.com/api/v3/financials/{statement}/"
-
         links[statement] = '\n'.join(root_url + i['symbol'] for i in data)
 
     share_url = "https://financialmodelingprep.com/api/v3/historical-price-full/"
-
-    links['share-prices'] = '\n'.join(root_url + i['symbol'] for i in data)
+    links['share-prices'] = '\n'.join(share_url + i['symbol'] for i in data)
 
     return links
 
 
 def download_data(links: Dict[str, str]):
-    jobs = 8
-
     for statement in links:
         os.makedirs(statement, exist_ok=True)
         print(f"Downloading {statement} files.")
