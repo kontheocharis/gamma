@@ -2,6 +2,7 @@
 # test_data/
 cache/
 .DS_Store/ # stupid mac shit
+data_fetchers/fmp_data/
 
 # --- PYTHON ---
 
