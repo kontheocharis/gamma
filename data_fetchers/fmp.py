@@ -16,9 +16,7 @@ statements = ('balance-sheet-statement', 'income-statement', 'cash-flow-statemen
 jobs = 8
 
 def get_links() -> Dict[str, str]:
-    links: str
     symbols_url = "https://financialmodelingprep.com/api/v3/company/stock/list"
-
     links: Dict[str, str] = {}
 
     data = requests.get(symbols_url).json()['symbolsList']
