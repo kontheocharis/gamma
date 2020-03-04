@@ -12,7 +12,6 @@ year_2014 = 5
 
 
 # IMPORTANT VARIABLES TO NOTE
-# Used function decorators to use the variable outside the function
 
 # analysing_statements.eps_2016
 # analysing_statements.total_outstanding_shares_2016
@@ -31,7 +30,8 @@ year_2014 = 5
 
 
 def analysing_statements(URL_income_statement, URL_balance_sheet, URL_cashflow_statement):
-
+   #variables = {}
+   
    # INCOME STATEMENT
 
    json_income_statement = requests.get(URL_income_statement).json()
@@ -42,6 +42,7 @@ def analysing_statements(URL_income_statement, URL_balance_sheet, URL_cashflow_s
 
    eps = df_income_statement["EPS Diluted"]
    analysing_statements.eps_2016 = float(eps.iloc[year_2016])
+   # variables["eps_2016"] = float(eps.iloc[year_2016])
 
    total_outstanding_shares = df_income_statement["Weighted Average Shs Out (Dil)"]
    analysing_statements.total_outstanding_shares_2016 = float(total_outstanding_shares.iloc[year_2016])
@@ -87,4 +88,5 @@ def analysing_statements(URL_income_statement, URL_balance_sheet, URL_cashflow_s
 
    free_cashflow = df_cashflow_statement["Free Cash Flow"]
    analysing_statements.free_cashflow_2016 = float(free_cashflow.iloc[year_2016])
+
 

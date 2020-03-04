@@ -28,15 +28,14 @@ def string_interpolation():
         string_interpolation.URL_income_statement = f"https://financialmodelingprep.com/api/v3/financials/income-statement/{string_interpolation.ticker}"
         json_income_statement = requests.get(string_interpolation.URL_income_statement).json()
         
-
         # Checking the size of income statement to see if it's empty
-        if len(json_income_statement) < 30:
+        if not json_income_statement:
             continue
-        else:
-            string_interpolation.URL_balance_sheet = f"https://financialmodelingprep.com/api/v3/financials/balance-sheet-statement/{string_interpolation.ticker}"
-            string_interpolation.URL_cashflow_statement = f"https://financialmodelingprep.com/api/v3/financials/cash-flow-statement/{string_interpolation.ticker}"
-            string_interpolation.URL_share_price = f"https://financialmodelingprep.com/api/v3/historical-price-full/{string_interpolation.ticker}?serietype=line"
-            #print(string_interpolation.URL_balance_sheet)
+        
+        string_interpolation.URL_balance_sheet = f"https://financialmodelingprep.com/api/v3/financials/balance-sheet-statement/{string_interpolation.ticker}"
+        string_interpolation.URL_cashflow_statement = f"https://financialmodelingprep.com/api/v3/financials/cash-flow-statement/{string_interpolation.ticker}"
+        string_interpolation.URL_share_price = f"https://financialmodelingprep.com/api/v3/historical-price-full/{string_interpolation.ticker}?serietype=line"
+        #print(string_interpolation.URL_balance_sheet)
 
 
 string_interpolation()
