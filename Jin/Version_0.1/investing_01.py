@@ -13,24 +13,23 @@ year_2014 = 5
 
 # IMPORTANT VARIABLES TO NOTE
 
-# analysing_statements.eps_2016
-# analysing_statements.total_outstanding_shares_2016
+   # analysing_statements.eps_2016
+   # analysing_statements.total_outstanding_shares_2016
 
-# analysing_statements.cash_2016
-# analysing_statements.ppe_net_2016
-# analysing_statements.total_assets_2016
-# analysing_statements.total_debt_2016
-# analysing_statements.total_liabilities_2016
-# analysing_statements.total_equity_2016
+   # analysing_statements.cash_2016
+   # analysing_statements.ppe_net_2016
+   # analysing_statements.total_assets_2016
+   # analysing_statements.total_debt_2016
+   # analysing_statements.total_liabilities_2016
+   # analysing_statements.total_equity_2016
 
-# analysing_statements.operating_cashflow_2016
-# analysing_statements.operating_cashflow_2015
-# analysing_statements.operating_cashflow_2014
-# analysing_statements.free_cashflow_2016
+   # analysing_statements.operating_cashflow_2016
+   # analysing_statements.operating_cashflow_2015
+   # analysing_statements.operating_cashflow_2014
+   # analysing_statements.free_cashflow_2016
 
 
 def analysing_statements(URL_income_statement, URL_balance_sheet, URL_cashflow_statement):
-   #variables = {}
    
    # INCOME STATEMENT
 

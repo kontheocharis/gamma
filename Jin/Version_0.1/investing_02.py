@@ -5,14 +5,12 @@ import requests
 
 
 # IMPORTANT VARIABLES TO NOTE
-# Used function decorators to use the variable outside the function
-
-# analysing_share_price.buy_share_price
-# analysing_share_price.sell_share_price
-# analysing_share_price.max_sell_price_possible --> the maximum sell price over the period of 3 years --> don't need this, but it might be useful to know
-# analysing_share_price.sell_date_of_100_gain --> the date when the 100% gain was made during the period of 3 years (if any)
-# analysing_share_price.sell_share_price_of_100_gain --> the sell price when the 100% gain was made during the period of 3 years (if any)
-
+    # Used function decorators to use the variable outside the function
+    # analysing_share_price.buy_share_price
+    # analysing_share_price.sell_share_price
+    # analysing_share_price.max_sell_price_possible --> the maximum sell price over the period of 3 years --> don't need this, but it might be useful to know
+    # analysing_share_price.sell_date_of_100_gain --> the date when the 100% gain was made during the period of 3 years (if any)
+    # analysing_share_price.sell_share_price_of_100_gain --> the sell price when the 100% gain was made during the period of 3 years (if any)
 
 
 def analysing_share_price(URL, buy_date, sell_date, goal_of_return_during_period):
@@ -52,5 +50,8 @@ def analysing_share_price(URL, buy_date, sell_date, goal_of_return_during_period
         # goal_of_return_during_period = 2 now, but it can be easily changed below when calling the umbrella function
             analysing_share_price.sell_date_of_100_gain = df_share_price["date"].iloc[i+buy_date_index]
             analysing_share_price.sell_share_price_of_100_gain = df_share_price["close"].iloc[i+buy_date_index]
-
         
+        else: 
+            analysing_share_price.sell_share_price_of_100_gain = "Unfortunately there was no 100% gain on this investment"
+
+       
