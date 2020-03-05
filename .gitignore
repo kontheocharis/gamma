@@ -1,6 +1,7 @@
 # --- CUSTOM ---
 # test_data/
 cache/
+.DS_Store/ # stupid mac shit
 
 # --- PYTHON ---
 
