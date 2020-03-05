@@ -1,22 +1,10 @@
 from dataclasses import dataclass
 import numpy as np
 import argparse
+from pprint import pprint
 
 from alpha.fmp import FmpDataFetcher
-
-
-@dataclass
-class Metrics:
-    """
-    Holds all the metrics required for calculation of investability.
-    """
-    cnav1: np.float64 = 0
-    nav: np.float64 = 0
-    pe_ratio: np.float64 = 0
-    cash_flow_all_positive: np.float64 = 0
-    debt_to_equity_ratio: np.float64 = 0
-    potential_roi: np.float64 = 0
-    market_cap: np.float64 = 0
+from alpha.metrics import V1Metrics, MetricAnalyser
 
 
 def should_invest(company: str, investing_year: int, cash_flow_period: int = 3) -> bool:
@@ -39,8 +27,7 @@ def should_invest(company: str, investing_year: int, cash_flow_period: int = 3) 
     curr_year_row = financial_data[financial_data.index.year == investing_year]
     curr_year = curr_year_row.iloc[0]
 
-    # Object in which to store all the metrics
-    metrics = Metrics()
+    metrics = V1Metrics()
 
     # This is not correct
     total_good_assets = curr_year['cash_short_term_investments'] + (curr_year['ppe'] / 2)
@@ -70,17 +57,10 @@ def should_invest(company: str, investing_year: int, cash_flow_period: int = 3) 
     metrics.market_cap = curr_year['total_outstanding_shares'] * share_price_at_date
 
     # Ensure that cash flow has been positive for the past `cash_flow_period` years
-    metrics.cash_flow_all_positive = all(cash_flow > 0 for cash_flow in financial_data['operating_cashflow'])
+    metrics.cash_flows = [cash_flow for cash_flow in financial_data['operating_cashflow']]
 
-    print(metrics)
-
-    # Main logic for deciding whether to invest
-    return metrics.cnav1 < metrics.nav \
-            and metrics.pe_ratio < 10 \
-            and metrics.cash_flow_all_positive \
-            and metrics.debt_to_equity_ratio < 1 \
-            and metrics.potential_roi > 1 \
-            and metrics.market_cap > 10**9
+    metrics.print()
+    metrics.are_investable()
 
 
 def main():
