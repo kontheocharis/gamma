@@ -3,7 +3,9 @@ Data fetcher for financialmodelingprep
 
 Fetches data from financialmodelingprep.com and stores it in current
 directory. Fetches yearly balance sheets, income statements, cash flow
-statements as well as daily share price data
+statements as well as daily share price data.
+
+Requires: wget, parallel
 """
 
 import os
@@ -35,7 +37,7 @@ def download_data(links: Dict[str, str]):
     for statement in links:
         os.makedirs(statement, exist_ok=True)
         print(f"Downloading {statement} files.")
-        subprocess.run(("parallel", "-j", f"{jobs}", "wget", "-O", statement + "/{/}.json", "{}"), input=str.encode(links[statement]))
+        subprocess.run(("parallel", "-j", f"{jobs}", "wget",  "-nc", "-O", statement + "/{/}.json", "{}"), input=str.encode(links[statement]))
 
     print("Done.")
 
