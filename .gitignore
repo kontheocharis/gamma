@@ -1,7 +1,7 @@
 # --- CUSTOM ---
 cache/
-.DS_Store # stupid mac shit
-data_dir # large data folder
+.DS_Store
+data_dir/
 
 # --- PYTHON ---
 
