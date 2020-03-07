@@ -1,8 +1,7 @@
 # --- CUSTOM ---
-# test_data/
 cache/
-.DS_Store/ # stupid mac shit
-data_fetchers/fmp_data/
+.DS_Store
+data_dir/
 
 # --- PYTHON ---
 
@@ -141,3 +140,4 @@ dmypy.json
 
 # pytype static type analyzer
 .pytype/
+

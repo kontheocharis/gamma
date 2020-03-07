@@ -2,12 +2,13 @@ from dataclasses import dataclass
 import numpy as np
 import argparse
 from pprint import pprint
+from datetime import date, timedelta
 
 from alpha.fmp import FmpDataFetcher
-from alpha.metrics import V1Metrics, MetricAnalyser
+from alpha.metrics import V1Metrics, BacktrackingAnalyser
 
 
-def should_invest(company: str, investing_year: int, cash_flow_period: int = 3) -> bool:
+def get_v1_metrics_for(company: str, investing_date: date, cash_flow_period: int = 3) -> bool:
     """
     Determines whether to invest in `company` in year `investing_year`.
 
@@ -18,13 +19,13 @@ def should_invest(company: str, investing_year: int, cash_flow_period: int = 3) 
     """
 
     # Use the financialmodelingprep.com fetcher for this
-    fetcher = FmpDataFetcher(company, (investing_year - cash_flow_period + 1, investing_year))
+    fetcher = FmpDataFetcher(company, (investing_date.year - cash_flow_period + 1, investing_date.year))
 
     stock_data = fetcher.stock_data()
     financial_data = fetcher.financial_data()
 
     # Get a reference to the current year
-    curr_year_row = financial_data[financial_data.index.year == investing_year]
+    curr_year_row = financial_data[financial_data.index.year == investing_date.year]
     curr_year = curr_year_row.iloc[0]
 
     metrics = V1Metrics()
@@ -41,8 +42,8 @@ def should_invest(company: str, investing_year: int, cash_flow_period: int = 3) 
         / curr_year['total_outstanding_shares']
 
     # Get the share price a day before the report was released
-    date_of_report = curr_year_row.index.values[0]
-    share_price_at_date = stock_data.loc[date_of_report - np.timedelta64(1,'D')]['high']
+    date_of_report = curr_year_row.index[0]
+    share_price_at_date = stock_data.loc[date_of_report - timedelta(days=1)]['high']
 
     # P/E ratio
     metrics.pe_ratio = share_price_at_date / curr_year['eps']
@@ -59,20 +60,17 @@ def should_invest(company: str, investing_year: int, cash_flow_period: int = 3) 
     # Ensure that cash flow has been positive for the past `cash_flow_period` years
     metrics.cash_flows = [cash_flow for cash_flow in financial_data['operating_cashflow']]
 
-    metrics.print()
-    metrics.are_investable()
+    return metrics
 
 
 def main():
     # Use command line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument('company')
-    parser.add_argument('year', type=int)
+    parser.add_argument('date', type=lambda s: date.fromisoformat(s))
     args = parser.parse_args()
 
-    decision = should_invest(company=args.company, investing_year=args.year)
 
-    if decision:
-        print("Invest!")
-    else:
-        print("Don't invest.")
+    metrics = get_v1_metrics_for(company=args.company, investing_date=args.date)
+
+    print(metrics)
