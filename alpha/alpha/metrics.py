@@ -21,9 +21,9 @@ class Metrics(ABC):
         pass
 
     def print(self, func=print):
-        print(f"{type(self).__name__}:")
+        func(f"{type(self).__name__}:")
         for k, v in self.__dict__.items():
-            print(f"\t{k} = {v}")
+            func(f"\t{k} = {v}")
 
 
 # TODO: add documentation
@@ -31,9 +31,8 @@ class BacktrackingAnalyser:
     """
     Container for all the metrics, for purposes of statistical analysis.
     """
-    _metric_data: Dict[str, Metrics]
-    _stock_data: Dict[str, pd.DataFrame]
-    _investing_prices: Dict[str, np.float64]
+    _metric_data: Dict[str, Metrics] = {}
+    _stock_data: Dict[str, pd.DataFrame] = {}
 
     _investing_date: date
     _return_percent: float
@@ -44,32 +43,32 @@ class BacktrackingAnalyser:
         self._return_percent = return_percent
 
 
-    def add_metrics_for(company: str, metrics: Metrics):
+    def add_metrics_for(self, company: str, metrics: Metrics):
         self._metric_data[company] = metrics
 
-    def add_stock_df_for(company: str, stock_df: pd.DataFrame):
+    def add_stock_df_for(self, company: str, stock_df: pd.DataFrame):
         self._stock_data[company] = stock_df
-
-    def add_investing_price_for(company: str, price: np.float64):
-        self._investing_prices[company] = price
 
 
     def average_accuracy(self) -> float:
-        return mean(self._prediction_was_sucessful(self._stock_data[company], self._investing_prices[company]) \
-                    for company, metrics in self._metric_data.items() if metrics.are_investable())
+        return mean(
+            float(self._prediction_was_sucessful(
+                self._stock_data[company],
+                self._stock_data[company].loc[self._investing_date]["high"]
+            )) for company, metrics in self._metric_data.items() if metrics.are_investable())
 
 
     def investable_percent(self) -> float:
         """
         Averages amount of values in `self.metrics` which are investable.
         """
-        return mean(metrics.are_investable() for metrics in self._metric_data.values())
+        return mean(float(metrics.are_investable()) for metrics in self._metric_data.values())
 
 
-    def _prediction_was_sucessful(stock_df: pd.DataFrame, investing_price: np,float64) -> bool:
+    def _prediction_was_sucessful(self, stock_df: pd.DataFrame, investing_price: np.float64) -> bool:
         relevant_df = stock_df[stock_df.index.date > self._investing_date]
         max_price = stock_df.max()["high"]
-        return max_price >= _return_percent * investing_price
+        return max_price >= self._return_percent * investing_price
 
 
 # Actual metric definitions:
