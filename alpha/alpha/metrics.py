@@ -1,7 +1,7 @@
 from enum import Enum
 from abc import ABC, abstractmethod
 from typing import Dict, List
-from statistics import mean
+from statistics import mean, StatisticsError
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -37,6 +37,8 @@ class BacktrackingAnalyser:
     _investing_date: date
     _return_percent: float
 
+    _amount_exceeded_return_percent: int = 0
+    _amount_successful: int = 0
 
     def __init__(self, investing_date: date, return_percent: float):
         self._investing_date = investing_date
@@ -51,26 +53,45 @@ class BacktrackingAnalyser:
 
 
     def average_accuracy(self) -> float:
-        return mean(
+        try:
+            return mean(
             float(self._prediction_was_sucessful(
                 self._stock_data[company],
                 self._stock_data[company].loc[self._investing_date]["high"]
             )) for company, metrics in self._metric_data.items() if metrics.are_investable())
+        except StatisticsError:
+            return 0
 
+    def investable_amount(self) -> int:
+        return sum(int(metrics.are_investable()) for metrics in self._metric_data.values())
+
+    def successful_amount(self) -> int:
+        return self._amount_successful
+
+    def exceeded_return_amount(self) -> int:
+        return self._amount_exceeded_return_percent
 
     def investable_percent(self) -> float:
         """
         Averages amount of values in `self.metrics` which are investable.
         """
-        return mean(float(metrics.are_investable()) for metrics in self._metric_data.values())
-
+        try:
+            return mean(float(metrics.are_investable()) for metrics in self._metric_data.values())
+        except StatisticsError:
+            return 0
 
     def _prediction_was_sucessful(self, stock_df: pd.DataFrame, investing_price: np.float64) -> bool:
         relevant_df = stock_df[stock_df.index.date > self._investing_date]
         max_price = relevant_df.max()["high"]
         if max_price >= self._return_percent * investing_price:
+            self._amount_exceeded_return_percent += 1
+            self._amount_successful += 1
             return True
-        return relevant_df.iloc[-1]["high"] > investing_price
+
+        if relevant_df.iloc[-1]["high"] > investing_price:
+            self._amount_successful += 1
+            return True
+        return False
 
 
 # Actual metric definitions:

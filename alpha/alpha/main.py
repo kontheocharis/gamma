@@ -170,8 +170,11 @@ def main():
             if metrics.are_investable():
                 logger.info(f"{company} is investable!")
 
-    print(f"Percentage of companies deemed investable: {analyser.investable_percent():.3f}")
-    print(f"Final average_accuracy: {analyser.average_accuracy():.3f}")
+    print("-- RESULTS --")
+    print(f"In total, {analyser.investable_amount()} companies were deemed investable out of {len(companies)}")
+    print(f"In percentage: {(analyser.investable_percent() * 100):.1f}%")
+    print(f"Of those {(analyser.average_accuracy() * 100):.1f}% were actually good investments ({analyser.successful_amount()}). (Backtracing)")
+    print(f"Of those, {analyser.exceeded_return_amount()} exceeded return_percent sometime during the waiting period.")
 
     # print(companies)
 
