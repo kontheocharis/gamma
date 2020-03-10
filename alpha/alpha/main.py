@@ -40,36 +40,29 @@ def get_v1_metrics_for(company: str,
                              data_dir)
     fetcher.load_pickle()
 
-    all_stock_data = fetcher.stock_data(restrict_dates=False)
-
     try:
+        all_stock_data = fetcher.stock_data(restrict_dates=False)
         stock_data = fetcher.restrict_dates(all_stock_data)
+        financial_data = fetcher.financial_data()
     except FmpNonExistentBoundsError as e:
-        for arg in e.args:
-            logger.warning(arg)
-            return None
+        logger.warning(f"No sufficient data for {company}, skipping.")
+        return
 
-    if stock_data.empty:
-        logger.warning(f"No stock data for {company}, skipping.")
-        return None
-
-    try:
-        _ = all_stock_data.loc[investing_date]
-    except KeyError:
+    if all_stock_data[all_stock_data.index.date == investing_date].empty:
         logger.warning(f"No stock data for investing_date for {company}, skipping.")
         return None
 
-    financial_data = fetcher.financial_data()
 
     # Get a reference to the current year
     try:
         curr_year = financial_data[financial_data.index.date < investing_date].iloc[-1]
     except IndexError:
-        logger.warning(f"Error for {company} for financial data, skipping.")
+        logger.warning(f"No suitable financial statement for {company}, skipping.")
         return None
 
     metrics = V1Metrics()
 
+    # Check for NaNs
     if any(math.isnan(x) for x in (
             curr_year['cash_short_term_investments'],
             curr_year['ppe'],
@@ -101,7 +94,7 @@ def get_v1_metrics_for(company: str,
     # Get the share price a day before the report was released
     date_of_report = curr_year.name
 
-    for i in range(0, 30): # buffer
+    for i in range(0, 30): # 30-day buffer
         try:
             share_date = date_of_report - timedelta(days=i)
             share_price_at_date = stock_data.loc[share_date]['high']
@@ -131,7 +124,11 @@ def get_v1_metrics_for(company: str,
     metrics.market_cap = curr_year['total_outstanding_shares'] * share_price_at_date
 
     # Ensure that cash flow has been positive for the past `cash_flow_period` years
-    metrics.cash_flows = [cash_flow for cash_flow in financial_data['operating_cashflow']]
+    cash_flows = financial_data[financial_data.index.date < investing_date]['operating_cashflow']
+    if len(cash_flows) < 3 or any(math.isnan(x) for x in cash_flows[:3]):
+        logger.warning(f"Insufficient cash flow history for {company}, skipping.")
+        return None
+    metrics.cash_flows = [cash_flow for cash_flow in cash_flows[:3]]
 
     fetcher.save_pickle()
     # logger.info(f"Dates: invest={investing_date}, lookahead_until={investing_date + timedelta(weeks=52 * lookahead_period)}, financial_statement_date={date_of_report.date()}, share_date={share_date}")
@@ -147,6 +144,7 @@ def main():
     args = parser.parse_args()
 
     # data_dir spec:
+
     #   companies -> \n separated list of company names to use
     #   balance-sheet-statement/
     #       X.json for X in companies
@@ -177,11 +175,8 @@ def main():
 
     analyser.run_analysis()
     print("-- RESULTS --")
-    print(f"In total, {analyser.investable_amount} companies were deemed investable out of {len(companies)}")
-    print(f"In percentage: {(analyser.investable_percent * 100):.1f}%")
-    print(f"Of those {(analyser.average_accuracy * 100):.1f}% were actually good investments ({analyser.amount_successful}). (Backtracing)")
+    print(f"{analyser.no_of_companies} of {len(companies)} companies had sufficient data.")
+    print(f"Of those, {analyser.investable_amount} were deemed investable ({(analyser.investable_percent * 100):.1f}%).")
+    print(f"Of those, {analyser.amount_successful} were actually good investments ({(analyser.average_accuracy * 100):.1f}%). [Backtracing]")
     print(f"Of those, {analyser.amount_exceeded_return_percent} exceeded return_percent sometime during the waiting period.")
-    print(f"TOTAL RETURNS: ${analyser.total_returns:.2f}")
-
-    # print(companies)
-
+    print(f"TOTAL RETURNS (in source currency): {analyser.total_returns:.2f}")

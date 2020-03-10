@@ -38,6 +38,7 @@ class BacktrackingAnalyser:
     _return_percent: float
 
     # Interface after run_analysis():
+    no_of_companies: int = 0
     amount_exceeded_return_percent: int = 0
     amount_successful: int = 0
     total_returns: float = 0
@@ -57,6 +58,8 @@ class BacktrackingAnalyser:
         self._stock_data[company] = stock_df
 
     def run_analysis(self):
+        self.no_of_companies = len(self._metric_data)
+
         try:
             self.average_accuracy = mean(
             float(self._prediction_was_sucessful(
