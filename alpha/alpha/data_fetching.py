@@ -1,11 +1,12 @@
 import requests
 import os
 import hashlib
-import json
+import ujson
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Final, Tuple, Optional
 from enum import Enum
+from datetime import date, timedelta
 
 import pandas as pd
 
@@ -63,6 +64,9 @@ class DataFetcher(ABC):
 class FmpError(Exception):
     pass
 
+class FmpNonExistentBoundsError(FmpError):
+    pass
+
 class FmpDataFetcher(DataFetcher):
     """
     An implementation of `DataFetcher` using financialmodelingprep.com API
@@ -74,10 +78,12 @@ class FmpDataFetcher(DataFetcher):
         is located.
     """
 
-    _year_start: int
-    _year_end: int
+    date_range: Tuple[date, date]
     _symb: str
     _data_dir: Optional[str]
+
+    _financial_data: Optional[pd.DataFrame] = None
+    _stock_data: Optional[pd.DataFrame] = None
 
     _BASE_URL = 'https://financialmodelingprep.com/api/v3'
     _CACHE_LOCATION = os.path.join(os.path.dirname(__file__), '../cache/')
@@ -85,20 +91,49 @@ class FmpDataFetcher(DataFetcher):
     _FINANCIAL_COMP = "financials/{}/{}"
     _SHARE_COMP = "historical-price-full/{}?from={}&to={}"
 
-    def __init__(self, company_symbol: str, year_range: Tuple[int, int], data_dir: Optional[str] = None):
-        self._year_start, self._year_end = year_range
+    def __init__(self, company_symbol: str, date_range: Tuple[date, date], data_dir: Optional[str] = None):
+        self._date_range = date_range
         self._symb = company_symbol
         self._data_dir = data_dir
 
 
+    def save_pickle(self):
+        save_url = os.path.join(self._CACHE_LOCATION, "fmp-pickle")
+        os.makedirs(save_url, exist_ok=True)
+
+        financial_path = f"{save_url}/financial-{self._symb}.pkl"
+        if not os.path.exists(financial_path):
+            self._financial_data.to_pickle(financial_path)
+
+        stock_path = f"{save_url}/stock-{self._symb}.pkl"
+        if not os.path.exists(stock_path):
+            self._stock_data.to_pickle(stock_path)
+
+
+    def load_pickle(self):
+        save_url = os.path.join(self._CACHE_LOCATION, "fmp-pickle")
+        os.makedirs(save_url, exist_ok=True)
+        paths = (f"{save_url}/financial-{self._symb}.pkl", f"{save_url}/stock-{self._symb}.pkl")
+
+        for p in paths:
+            if not os.path.exists(p):
+                return
+
+        self._financial_data = pd.read_pickle(paths[0])
+        self._stock_data = pd.read_pickle(paths[1])
+
+
     def financial_data(self) -> pd.DataFrame:
+        if self._financial_data is not None:
+            return self._format_df(self._financial_data)
+
         statements = (Statement.BALANCE_SHEET, Statement.INCOME_STATEMENT, Statement.CASH_FLOW_STATEMENT)
 
         raw_dfs = {}
         for statement in statements:
-            data = json.loads(self._load_resource(statement))
+            data = ujson.loads(self._load_resource(statement))
             if not data: raise FmpError(f"no {self._statement_to_string(statement)} data for {self._symb}")
-            raw_dfs[statement] = pd.DataFrame(data['financials'])
+            raw_dfs[statement] = pd.json_normalize(data, record_path='financials')
             raw_dfs[statement].set_index('date', inplace=True)
 
         ics = raw_dfs[Statement.INCOME_STATEMENT]
@@ -119,19 +154,32 @@ class FmpDataFetcher(DataFetcher):
 
         df = pd.DataFrame(mappings, copy=False)
 
+        self._financial_data = df
         df = self._format_df(df)
         return df
 
 
     def stock_data(self, restrict_dates=True) -> pd.DataFrame:
-        data = json.loads(self._load_resource(Statement.SHARE_PRICES))
+        if self._stock_data is not None:
+            return self._format_df(self._stock_data)
+
+        data = ujson.loads(self._load_resource(Statement.SHARE_PRICES))
         if not data: raise FmpError(f"no {self._statement_to_string(statement)} data for {self._symb}")
 
-        df = pd.DataFrame(data['historical']).filter(items=('date', 'high', 'low'))
+        df = pd.json_normalize(data, record_path='historical').filter(items=('date', 'high', 'low'))
         df.set_index('date', inplace=True)
 
-        df = self._format_df(df)
+        self._stock_data = df
+        df = self._format_df(df, restrict_dates)
         return df
+
+
+    def restrict_dates(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
+        try:
+            df = df.loc[self._date_range[0]:self._date_range[1] + timedelta(days=1)]
+            return df
+        except KeyError:
+            raise FmpNonExistentBoundsError("no data available for date bounds")
 
 
     def _format_df(self, df: pd.DataFrame, restrict_dates=True) -> pd.DataFrame:
@@ -145,7 +193,7 @@ class FmpDataFetcher(DataFetcher):
         df = df.apply(pd.to_numeric, errors='raise')
         df.sort_index(inplace=True)
         if restrict_dates:
-            df = df.loc[str(self._year_start):str(self._year_end)]
+            df = self.restrict_dates(df)
         return df
 
 
@@ -177,21 +225,23 @@ class FmpDataFetcher(DataFetcher):
                                    f"{self._symb}.json"), 'r') as f:
                 return f.read()
 
-        url = f"{self._BASE_URL}/{self._FINANCIAL_COMP.format(self._statement_to_string(statement), self._symb)}" \
-            if statement != Statement.SHARE_PRICES else \
-            f"{self._BASE_URL}/{self._SHARE_COMP.format(self._symb, self._year_start, self._year_end + 1)}"
+        else:
+            assert False
+        # url = f"{self._BASE_URL}/{self._FINANCIAL_COMP.format(self._statement_to_string(statement), self._symb)}" \
+        #     if statement != Statement.SHARE_PRICES else \
+        #     f"{self._BASE_URL}/{self._SHARE_COMP.format(self._symb, self._year_start, self._year_end + 1)}"
 
-        url_hash = hashlib.sha1(url.encode('utf-8')).hexdigest()[:10]
-        file_location = os.path.join(self._CACHE_LOCATION, url_hash)
+        # url_hash = hashlib.sha1(url.encode('utf-8')).hexdigest()[:10]
+        # file_location = os.path.join(self._CACHE_LOCATION, url_hash)
 
-        if os.path.exists(file_location):
-            with open(file_location, 'r') as f:
-                contents = f.read()
-            return contents
+        # if os.path.exists(file_location):
+        #     with open(file_location, 'r') as f:
+        #         contents = f.read()
+        #     return contents
 
-        contents = requests.get(url).text
-        os.makedirs(os.path.dirname(file_location), exist_ok=True)
+        # contents = requests.get(url).text
+        # os.makedirs(os.path.dirname(file_location), exist_ok=True)
 
-        with open(file_location, 'w') as f:
-            f.write(contents)
-        return contents
+        # with open(file_location, 'w') as f:
+        #     f.write(contents)
+        # return contents

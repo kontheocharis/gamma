@@ -11,7 +11,7 @@ from typing import Callable, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from alpha.data_fetching import FmpDataFetcher
+from alpha.data_fetching import FmpDataFetcher, FmpNonExistentBoundsError
 from alpha.metrics import V1Metrics, BacktrackingAnalyser
 
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 def get_v1_metrics_for(company: str,
                        investing_date: date,
                        cash_flow_period: int = 3,
+                       lookahead_period: int = 3,
                        data_dir: Optional[str] = None) -> Optional[Tuple[V1Metrics, pd.DataFrame]]:
     """
     Determines whether to invest in `company` in year `investing_year`.
@@ -33,11 +34,19 @@ def get_v1_metrics_for(company: str,
 
     # Use the financialmodelingprep.com fetcher for this
     fetcher = FmpDataFetcher(company,
-                             (investing_date.year - cash_flow_period + 1, investing_date.year),
+                             (investing_date - timedelta(weeks=52 * cash_flow_period),
+                             investing_date + timedelta(weeks=52 * lookahead_period)),
                              data_dir)
+    fetcher.load_pickle()
 
-    stock_data = fetcher.stock_data()
     all_stock_data = fetcher.stock_data(restrict_dates=False)
+
+    try:
+        stock_data = fetcher.restrict_dates(all_stock_data)
+    except FmpNonExistentBoundsError as e:
+        for arg in e.args:
+            logger.warning(arg)
+            return None
 
     if stock_data.empty:
         logger.warning(f"No stock data for {company}, skipping.")
@@ -52,11 +61,10 @@ def get_v1_metrics_for(company: str,
     financial_data = fetcher.financial_data()
 
     # Get a reference to the current year
-    curr_year_row = financial_data[financial_data.index.year == investing_date.year]
     try:
-        curr_year = curr_year_row.iloc[0]
+        curr_year = financial_data[financial_data.index.date < investing_date].iloc[-1]
     except IndexError:
-        logger.warning(f"Error for {company}, skipping.")
+        logger.warning(f"Error for {company} for financial data, skipping.")
         return None
 
     metrics = V1Metrics()
@@ -90,7 +98,7 @@ def get_v1_metrics_for(company: str,
         / curr_year['total_outstanding_shares']
 
     # Get the share price a day before the report was released
-    date_of_report = curr_year_row.index[0]
+    date_of_report = curr_year.name
 
     for i in range(1, 30): # buffer
         try:
@@ -123,6 +131,7 @@ def get_v1_metrics_for(company: str,
     # Ensure that cash flow has been positive for the past `cash_flow_period` years
     metrics.cash_flows = [cash_flow for cash_flow in financial_data['operating_cashflow']]
 
+    fetcher.save_pickle()
     return metrics, all_stock_data
 
 
@@ -151,7 +160,7 @@ def main():
 
     logger.info("Running.")
     for company in companies:
-        result = get_v1_metrics_for(company, investing_date=args.date, data_dir=args.data_dir)
+        result = get_v1_metrics_for(company, investing_date=args.date, data_dir=args.data_dir, lookahead_period=3, cash_flow_period=3)
         if result:
             logger.info(f"{company} has workable data.")
             metrics, stock_df = result

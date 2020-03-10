@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List
 from statistics import mean
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
@@ -67,8 +67,10 @@ class BacktrackingAnalyser:
 
     def _prediction_was_sucessful(self, stock_df: pd.DataFrame, investing_price: np.float64) -> bool:
         relevant_df = stock_df[stock_df.index.date > self._investing_date]
-        max_price = stock_df.max()["high"]
-        return max_price >= self._return_percent * investing_price
+        max_price = relevant_df.max()["high"]
+        if max_price >= self._return_percent * investing_price:
+            return True
+        return relevant_df.iloc[-1]["high"] > investing_price
 
 
 # Actual metric definitions:

@@ -11,6 +11,7 @@ scipy = "*"
 matplotlib = "*"
 pandas = "*"
 xlrd = "*"
+ujson = "*"
 
 [requires]
 python_version = "3.8"
