@@ -127,10 +127,10 @@ def get_v1_metrics_for(company: str,
 
     # Ensure that cash flow has been positive for the past `cash_flow_period` years
     cash_flows = financial_data[financial_data.index.date < investing_date]['operating_cashflow']
-    if len(cash_flows) < 3 or any(math.isnan(x) for x in cash_flows[:3]):
+    if len(cash_flows) < cash_flow_period or any(math.isnan(x) for x in cash_flows[:cash_flow_period]):
         logger.warning(f"Insufficient cash flow history for {company}, skipping.")
         return None
-    metrics.cash_flows = [cash_flow for cash_flow in cash_flows[:3]]
+    metrics.cash_flows = [cash_flow for cash_flow in cash_flows[:cash_flow_period]]
 
     fetcher.save_pickle()
     # logger.info(f"Dates: invest={investing_date}, lookahead_until={investing_date + timedelta(weeks=52 * lookahead_period)}, financial_statement_date={date_of_report.date()}, share_date={share_date}")
