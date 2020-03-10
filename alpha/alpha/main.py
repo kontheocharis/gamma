@@ -21,9 +21,9 @@ logger = logging.getLogger(__name__)
 
 def get_v1_metrics_for(company: str,
                        investing_date: date,
-                       cash_flow_period: int = 3,
-                       lookahead_period: int = 3,
-                       data_dir: Optional[str] = None) -> Optional[Tuple[V1Metrics, pd.DataFrame]]:
+                       cash_flow_period: int,
+                       lookahead_period: int,
+                       data_dir: str) -> Optional[Tuple[V1Metrics, pd.DataFrame]]:
     """
     Determines whether to invest in `company` in year `investing_year`.
 
@@ -48,7 +48,7 @@ def get_v1_metrics_for(company: str,
         financial_data = fetcher.financial_data()
     except FmpNonExistentBoundsError as e:
         logger.warning(f"No sufficient data for {company}, skipping.")
-        return
+        return None
 
     if all_stock_data[all_stock_data.index.date == investing_date].empty:
         logger.warning(f"No stock data for investing_date for {company}, skipping.")

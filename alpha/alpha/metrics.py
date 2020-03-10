@@ -8,7 +8,6 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
-@dataclass(init=False)
 class Metrics(ABC):
     """
     Holds all the metrics required for calculation of investability.

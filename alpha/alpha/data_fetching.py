@@ -169,7 +169,7 @@ class FmpDataFetcher(DataFetcher):
         return df
 
 
-    def restrict_dates(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
+    def restrict_dates(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.loc[self._date_range[0]:self._date_range[1]]
         if df.empty:
             raise FmpNonExistentBoundsError("no data available for date bounds")
