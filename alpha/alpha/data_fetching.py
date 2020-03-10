@@ -4,7 +4,7 @@ import hashlib
 import ujson
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Final, Tuple, Optional
+from typing import Final, Tuple, Optional, Dict
 from enum import Enum
 from datetime import date, timedelta
 
@@ -80,47 +80,42 @@ class FmpDataFetcher(DataFetcher):
 
     date_range: Tuple[date, date]
     _symb: str
-    _data_dir: Optional[str]
+    _data_dir: str
 
     _financial_data: Optional[pd.DataFrame] = None
     _stock_data: Optional[pd.DataFrame] = None
 
-    _BASE_URL = 'https://financialmodelingprep.com/api/v3'
     _CACHE_LOCATION = os.path.join(os.path.dirname(__file__), '../cache/')
+    _PICKLE_SAVE_URL: str
+    _PICKLE_PATHS: Dict[str, str]
 
-    _FINANCIAL_COMP = "financials/{}/{}"
-    _SHARE_COMP = "historical-price-full/{}?from={}&to={}"
 
-    def __init__(self, company_symbol: str, date_range: Tuple[date, date], data_dir: Optional[str] = None):
+    def __init__(self, company_symbol: str, date_range: Tuple[date, date], data_dir: str):
         self._date_range = date_range
         self._symb = company_symbol
         self._data_dir = data_dir
 
+        self._PICKLE_SAVE_URL = os.path.join(self._CACHE_LOCATION, 'fmp-pickle')
+        self._PICKLE_PATHS = {p: os.path.join(self._PICKLE_SAVE_URL, f"{p}-{self._symb}.pkl") \
+                              for p in ('financial', 'stock')}
 
     def save_pickle(self):
-        save_url = os.path.join(self._CACHE_LOCATION, "fmp-pickle")
-        os.makedirs(save_url, exist_ok=True)
+        os.makedirs(self._PICKLE_SAVE_URL, exist_ok=True)
 
-        financial_path = f"{save_url}/financial-{self._symb}.pkl"
-        if not os.path.exists(financial_path):
-            self._financial_data.to_pickle(financial_path)
+        if not os.path.exists(self._PICKLE_PATHS['financial']):
+            self._financial_data.to_pickle(self._PICKLE_PATHS['financial'])
 
-        stock_path = f"{save_url}/stock-{self._symb}.pkl"
-        if not os.path.exists(stock_path):
-            self._stock_data.to_pickle(stock_path)
+        if not os.path.exists(self._PICKLE_PATHS['stock']):
+            self._stock_data.to_pickle(self._PICKLE_PATHS['stock'])
 
 
     def load_pickle(self):
-        save_url = os.path.join(self._CACHE_LOCATION, "fmp-pickle")
-        os.makedirs(save_url, exist_ok=True)
-        paths = (f"{save_url}/financial-{self._symb}.pkl", f"{save_url}/stock-{self._symb}.pkl")
-
-        for p in paths:
-            if not os.path.exists(p):
+        for path in self._PICKLE_PATHS.values():
+            if not os.path.exists(path):
                 return
 
-        self._financial_data = pd.read_pickle(paths[0])
-        self._stock_data = pd.read_pickle(paths[1])
+        self._financial_data = pd.read_pickle(self._PICKLE_PATHS['financial'])
+        self._stock_data = pd.read_pickle(self._PICKLE_PATHS['stock'])
 
 
     def financial_data(self) -> pd.DataFrame:
@@ -164,7 +159,7 @@ class FmpDataFetcher(DataFetcher):
             return self._format_df(self._stock_data)
 
         data = ujson.loads(self._load_resource(Statement.SHARE_PRICES))
-        if not data: raise FmpError(f"no {self._statement_to_string(statement)} data for {self._symb}")
+        if not data: raise FmpError(f"no stock data for {self._symb}")
 
         df = pd.json_normalize(data, record_path='historical').filter(items=('date', 'high', 'low'))
         df.set_index('date', inplace=True)
@@ -210,37 +205,10 @@ class FmpDataFetcher(DataFetcher):
 
     def _load_resource(self, statement: Statement) -> str:
         """
-        Loads a url resource.
-
-        If `self._data_dir` exists, loads from there. Otherwise, looks at
-        the cache first (see `self._CACHE_LOCATION`) and returns the resource
-        if present.  If it isn't, fetches the resource at `url`, returns it and
-        updates the cache.
+        Loads a resource from self._data_dir.
         """
-
-        if self._data_dir:
-            with open(os.path.join(self._data_dir,
-                                   self._statement_to_string(statement),
-                                   f"{self._symb}.json"), 'r') as f:
-                return f.read()
-
-        else:
-            assert False
-        # url = f"{self._BASE_URL}/{self._FINANCIAL_COMP.format(self._statement_to_string(statement), self._symb)}" \
-        #     if statement != Statement.SHARE_PRICES else \
-        #     f"{self._BASE_URL}/{self._SHARE_COMP.format(self._symb, self._year_start, self._year_end + 1)}"
-
-        # url_hash = hashlib.sha1(url.encode('utf-8')).hexdigest()[:10]
-        # file_location = os.path.join(self._CACHE_LOCATION, url_hash)
-
-        # if os.path.exists(file_location):
-        #     with open(file_location, 'r') as f:
-        #         contents = f.read()
-        #     return contents
-
-        # contents = requests.get(url).text
-        # os.makedirs(os.path.dirname(file_location), exist_ok=True)
-
-        # with open(file_location, 'w') as f:
-        #     f.write(contents)
-        # return contents
+        with open(os.path.join(
+                self._data_dir,
+                self._statement_to_string(statement),
+                f"{self._symb}.json"), 'r') as f:
+            return f.read()

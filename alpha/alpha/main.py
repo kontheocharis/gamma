@@ -34,10 +34,12 @@ def get_v1_metrics_for(company: str,
     """
 
     # Use the financialmodelingprep.com fetcher for this
-    fetcher = FmpDataFetcher(company,
-                             (investing_date - timedelta(weeks=52 * cash_flow_period),
-                             investing_date + timedelta(weeks=52 * lookahead_period)),
-                             data_dir)
+    fetcher = FmpDataFetcher(
+        company,
+        (investing_date - timedelta(weeks=52 * cash_flow_period),
+         investing_date + timedelta(weeks=52 * lookahead_period)),
+        data_dir)
+
     fetcher.load_pickle()
 
     try:
@@ -54,11 +56,11 @@ def get_v1_metrics_for(company: str,
 
 
     # Get a reference to the current year
-    try:
-        curr_year = financial_data[financial_data.index.date < investing_date].iloc[-1]
-    except IndexError:
+    curr_year_row = financial_data[financial_data.index.date < investing_date]
+    if curr_year_row.empty or curr_year_row.index.year[-1] < (investing_date.year - 1):
         logger.warning(f"No suitable financial statement for {company}, skipping.")
         return None
+    curr_year = curr_year_row.iloc[-1]
 
     metrics = V1Metrics()
 
@@ -157,11 +159,18 @@ def main():
     with open(os.path.join(args.data_dir, 'companies'), 'r') as f:
         companies = f.read().splitlines()
 
-    analyser = BacktrackingAnalyser(investing_date=args.date, return_percent=args.return_percent)
+    analyser = BacktrackingAnalyser(
+        investing_date=args.date,
+        return_percent=args.return_percent)
 
     logger.info("Running.")
     for company in companies:
-        result = get_v1_metrics_for(company, investing_date=args.date, data_dir=args.data_dir, lookahead_period=3, cash_flow_period=3)
+        result = get_v1_metrics_for(
+            company,
+            investing_date=args.date,
+            data_dir=args.data_dir,
+            lookahead_period=3,
+            cash_flow_period=3)
         if not result:
             continue
 
@@ -174,6 +183,7 @@ def main():
             logger.info(f"{company} is investable!")
 
     analyser.run_analysis()
+
     print("-- RESULTS --")
     print(f"{analyser.no_of_companies} of {len(companies)} companies had sufficient data.")
     print(f"Of those, {analyser.investable_amount} were deemed investable ({(analyser.investable_percent * 100):.1f}%).")
