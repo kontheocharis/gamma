@@ -37,8 +37,13 @@ class BacktrackingAnalyser:
     _investing_date: date
     _return_percent: float
 
-    _amount_exceeded_return_percent: int = 0
-    _amount_successful: int = 0
+    # Interface after run_analysis():
+    amount_exceeded_return_percent: int = 0
+    amount_successful: int = 0
+    total_returns: float = 0
+    average_accuracy: float = 0
+    investable_amount: int = 0
+    investable_percent: float = 0
 
     def __init__(self, investing_date: date, return_percent: float):
         self._investing_date = investing_date
@@ -51,46 +56,38 @@ class BacktrackingAnalyser:
     def add_stock_df_for(self, company: str, stock_df: pd.DataFrame):
         self._stock_data[company] = stock_df
 
-
-    def average_accuracy(self) -> float:
+    def run_analysis(self):
         try:
-            return mean(
+            self.average_accuracy = mean(
             float(self._prediction_was_sucessful(
                 self._stock_data[company],
                 self._stock_data[company].loc[self._investing_date]["high"]
             )) for company, metrics in self._metric_data.items() if metrics.are_investable())
         except StatisticsError:
-            return 0
+            pass
 
-    def investable_amount(self) -> int:
-        return sum(int(metrics.are_investable()) for metrics in self._metric_data.values())
+        self.investable_amount = sum(int(metrics.are_investable()) for metrics in self._metric_data.values())
 
-    def successful_amount(self) -> int:
-        return self._amount_successful
-
-    def exceeded_return_amount(self) -> int:
-        return self._amount_exceeded_return_percent
-
-    def investable_percent(self) -> float:
-        """
-        Averages amount of values in `self.metrics` which are investable.
-        """
         try:
-            return mean(float(metrics.are_investable()) for metrics in self._metric_data.values())
+            self.investable_percent = mean(float(metrics.are_investable()) for metrics in self._metric_data.values())
         except StatisticsError:
-            return 0
+            pass
 
     def _prediction_was_sucessful(self, stock_df: pd.DataFrame, investing_price: np.float64) -> bool:
         relevant_df = stock_df[stock_df.index.date > self._investing_date]
         max_price = relevant_df.max()["high"]
         if max_price >= self._return_percent * investing_price:
-            self._amount_exceeded_return_percent += 1
-            self._amount_successful += 1
+            self.amount_exceeded_return_percent += 1
+            self.amount_successful += 1
+            self.total_returns += max_price - investing_price
             return True
 
         if relevant_df.iloc[-1]["high"] > investing_price:
-            self._amount_successful += 1
+            self.amount_successful += 1
+            self.total_returns += relevant_df.iloc[-1]["high"] - investing_price
             return True
+
+        self.total_returns += relevant_df.iloc[-1]["high"] - investing_price
         return False
 
 

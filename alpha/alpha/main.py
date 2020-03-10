@@ -14,7 +14,8 @@ import pandas as pd
 from alpha.data_fetching import FmpDataFetcher, FmpNonExistentBoundsError
 from alpha.metrics import V1Metrics, BacktrackingAnalyser
 
-logging.basicConfig(level=logging.INFO)
+LOGGING_FORMAT = "%(levelname)s: %(message)s"
+logging.basicConfig(level=logging.INFO, format=LOGGING_FORMAT)
 logger = logging.getLogger(__name__)
 
 
@@ -100,9 +101,10 @@ def get_v1_metrics_for(company: str,
     # Get the share price a day before the report was released
     date_of_report = curr_year.name
 
-    for i in range(1, 30): # buffer
+    for i in range(0, 30): # buffer
         try:
-            share_price_at_date = stock_data.loc[date_of_report - timedelta(days=i)]['high']
+            share_date = date_of_report - timedelta(days=i)
+            share_price_at_date = stock_data.loc[share_date]['high']
             break
         except KeyError:
             continue
@@ -132,6 +134,7 @@ def get_v1_metrics_for(company: str,
     metrics.cash_flows = [cash_flow for cash_flow in financial_data['operating_cashflow']]
 
     fetcher.save_pickle()
+    # logger.info(f"Dates: invest={investing_date}, lookahead_until={investing_date + timedelta(weeks=52 * lookahead_period)}, financial_statement_date={date_of_report.date()}, share_date={share_date}")
     return metrics, all_stock_data
 
 
@@ -161,20 +164,24 @@ def main():
     logger.info("Running.")
     for company in companies:
         result = get_v1_metrics_for(company, investing_date=args.date, data_dir=args.data_dir, lookahead_period=3, cash_flow_period=3)
-        if result:
-            logger.info(f"{company} has workable data.")
-            metrics, stock_df = result
-            analyser.add_metrics_for(company, metrics)
-            analyser.add_stock_df_for(company, stock_df)
+        if not result:
+            continue
 
-            if metrics.are_investable():
-                logger.info(f"{company} is investable!")
+        logger.info(f"{company} has workable data.")
+        metrics, stock_df = result
+        analyser.add_metrics_for(company, metrics)
+        analyser.add_stock_df_for(company, stock_df)
 
+        if metrics.are_investable():
+            logger.info(f"{company} is investable!")
+
+    analyser.run_analysis()
     print("-- RESULTS --")
-    print(f"In total, {analyser.investable_amount()} companies were deemed investable out of {len(companies)}")
-    print(f"In percentage: {(analyser.investable_percent() * 100):.1f}%")
-    print(f"Of those {(analyser.average_accuracy() * 100):.1f}% were actually good investments ({analyser.successful_amount()}). (Backtracing)")
-    print(f"Of those, {analyser.exceeded_return_amount()} exceeded return_percent sometime during the waiting period.")
+    print(f"In total, {analyser.investable_amount} companies were deemed investable out of {len(companies)}")
+    print(f"In percentage: {(analyser.investable_percent * 100):.1f}%")
+    print(f"Of those {(analyser.average_accuracy * 100):.1f}% were actually good investments ({analyser.amount_successful}). (Backtracing)")
+    print(f"Of those, {analyser.amount_exceeded_return_percent} exceeded return_percent sometime during the waiting period.")
+    print(f"TOTAL RETURNS: ${analyser.total_returns:.2f}")
 
     # print(companies)
 
