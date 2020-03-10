@@ -39,22 +39,37 @@ class DataFetcher(ABC):
     STOCK_COLUMNS: Final = ('high', 'low')
 
     @abstractmethod
-    def financial_data(self) -> pd.DataFrame:
+    def financial_data(self, restrict_dates: bool = True) -> pd.DataFrame:
         """
         Gets yearly financial data of company.
 
+        :param restrict_dates: Whether to cap the dataset at certain dates
+            (internal).
         :returns: a date-indexed `pd.DataFrame` with columns
-        `self.FINANCIAL_COLUMNS` and yearly data points.
+            `self.FINANCIAL_COLUMNS` and yearly data points.
         """
         pass
 
     @abstractmethod
-    def stock_data(self) -> pd.DataFrame:
+    def stock_data(self, restrict_dates: bool = True) -> pd.DataFrame:
         """
         Gets daily stock data of company.
 
+        :param restrict_dates: Whether to cap the dataset at certain dates
+            (internal).
         :returns: a date-indexed `pd.DataFrame` with columns `self.STOCK_COLUMNS`
-        and daily data points.
+            and daily data points.
+        """
+        pass
+
+
+    @abstractmethod
+    def restrict_dates(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Caps `df` at certain start and end dates (internal).
+
+        :param df: The `pd.DataFrame` to cap.
+        :returns: The modified `df`.
         """
         pass
 
@@ -118,13 +133,13 @@ class FmpDataFetcher(DataFetcher):
         self._stock_data = pd.read_pickle(self._PICKLE_PATHS['stock'])
 
 
-    def financial_data(self) -> pd.DataFrame:
+    def financial_data(self, restrict_dates: bool = True) -> pd.DataFrame:
         if self._financial_data is not None:
             return self._format_df(self._financial_data)
 
         statements = (Statement.BALANCE_SHEET, Statement.INCOME_STATEMENT, Statement.CASH_FLOW_STATEMENT)
 
-        raw_dfs = {}
+        raw_dfs: Dict[Statement, pd.DataFrame] = {}
         for statement in statements:
             data = ujson.loads(self._load_resource(statement))
             if not data: raise FmpError(f"no {self._statement_to_string(statement)} data for {self._symb}")
@@ -150,11 +165,11 @@ class FmpDataFetcher(DataFetcher):
         df = pd.DataFrame(mappings, copy=False)
 
         self._financial_data = df
-        df = self._format_df(df)
+        df = self._format_df(df, restrict_dates)
         return df
 
 
-    def stock_data(self, restrict_dates=True) -> pd.DataFrame:
+    def stock_data(self, restrict_dates: bool = True) -> pd.DataFrame:
         if self._stock_data is not None:
             return self._format_df(self._stock_data)
 
@@ -176,7 +191,7 @@ class FmpDataFetcher(DataFetcher):
         return df
 
 
-    def _format_df(self, df: pd.DataFrame, restrict_dates=True) -> pd.DataFrame:
+    def _format_df(self, df: pd.DataFrame, restrict_dates: bool = True) -> pd.DataFrame:
         """
         Gets `df` in the right format, including parsing indices and values,
         and limiting to applicable dates.

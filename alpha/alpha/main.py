@@ -33,7 +33,7 @@ def get_v1_metrics_for(company: str,
         `investing_year`, does cash flow need to be positive?
     """
 
-    # Use the financialmodelingprep.com fetcher for this
+    # Use the financialmodelingprep.com fetcher.
     fetcher = FmpDataFetcher(
         company,
         (investing_date - timedelta(weeks=52 * cash_flow_period),
@@ -42,6 +42,7 @@ def get_v1_metrics_for(company: str,
 
     fetcher.load_pickle()
 
+    # Get the data.
     try:
         all_stock_data = fetcher.stock_data(restrict_dates=False)
         stock_data = fetcher.restrict_dates(all_stock_data)
@@ -50,12 +51,13 @@ def get_v1_metrics_for(company: str,
         logger.warning(f"No sufficient data for {company}, skipping.")
         return None
 
+    # Ensure that data exists for the investing date.
     if all_stock_data[all_stock_data.index.date == investing_date].empty:
         logger.warning(f"No stock data for investing_date for {company}, skipping.")
         return None
 
 
-    # Get a reference to the current year
+    # Get a reference to the current year.
     curr_year_row = financial_data[financial_data.index.date < investing_date]
     if curr_year_row.empty or curr_year_row.index.year[-1] < (investing_date.year - 1):
         logger.warning(f"No suitable financial statement for {company}, skipping.")
@@ -64,7 +66,7 @@ def get_v1_metrics_for(company: str,
 
     metrics = V1Metrics()
 
-    # Check for NaNs
+    # Check for NaNs.
     if any(math.isnan(x) for x in (
             curr_year['cash_short_term_investments'],
             curr_year['ppe'],
@@ -79,7 +81,7 @@ def get_v1_metrics_for(company: str,
         return None
         
 
-    # This is not correct
+    # FIXME: This is not correct.
     total_good_assets = curr_year['cash_short_term_investments'] + (curr_year['ppe'] / 2)
 
     # CNAV1
@@ -93,12 +95,14 @@ def get_v1_metrics_for(company: str,
     metrics.nav = (curr_year['total_assets'] - curr_year['total_liabilities']) \
         / curr_year['total_outstanding_shares']
 
-    # Get the share price a day before the report was released
+    # Get the share price a day before the report was released.
     date_of_report = curr_year.name
-
-    for i in range(0, 30): # 30-day buffer
+    for days in range(1, 30):
         try:
-            share_date = date_of_report - timedelta(days=i)
+            share_date = date_of_report - timedelta(days=days)
+
+            # If share price isn't present on day of report, we keep going back
+            # in time until we find one.
             share_price_at_date = stock_data.loc[share_date]['high']
             break
         except KeyError:
@@ -125,24 +129,43 @@ def get_v1_metrics_for(company: str,
     # Market cap.
     metrics.market_cap = curr_year['total_outstanding_shares'] * share_price_at_date
 
-    # Ensure that cash flow has been positive for the past `cash_flow_period` years
+    # Ensure that cash flow has been positive for the past `cash_flow_period`
+    # years.
     cash_flows = financial_data[financial_data.index.date < investing_date]['operating_cashflow']
     if len(cash_flows) < cash_flow_period or any(math.isnan(x) for x in cash_flows[:cash_flow_period]):
         logger.warning(f"Insufficient cash flow history for {company}, skipping.")
         return None
+
+    # Cash flows
     metrics.cash_flows = [cash_flow for cash_flow in cash_flows[:cash_flow_period]]
 
     fetcher.save_pickle()
-    # logger.info(f"Dates: invest={investing_date}, lookahead_until={investing_date + timedelta(weeks=52 * lookahead_period)}, financial_statement_date={date_of_report.date()}, share_date={share_date}")
     return metrics, all_stock_data
 
 
 def main():
-    # Use command line arguments
+    # Use command line arguments.
     parser = argparse.ArgumentParser()
-    parser.add_argument('data_dir')
-    parser.add_argument('date', type=lambda s: date.fromisoformat(s))
-    parser.add_argument('return_percent', type=float)
+    parser.add_argument(
+        '--data-dir', required=True,
+        help="the directory in which the financialmodelingprep data can be found")
+
+    parser.add_argument(
+        '--date', required=True, type=lambda s: date.fromisoformat(s),
+        help="the investing date chosen")
+
+    parser.add_argument(
+        '--return-percent', default=1.0, type=float,
+        help="the amount of return that warrants to sell stock before the lookahead period")
+
+    parser.add_argument(
+        '--lookahead-period', default=3, type=int,
+        help="the max amount of time to wait until selling stock")
+
+    parser.add_argument(
+        '--cash-flow-period', default=3, type=int,
+        help="the amount of years in the past for which cash flow has to be positive")
+
     args = parser.parse_args()
 
     # data_dir spec:
@@ -169,8 +192,8 @@ def main():
             company,
             investing_date=args.date,
             data_dir=args.data_dir,
-            lookahead_period=3,
-            cash_flow_period=3)
+            lookahead_period=args.lookahead_period,
+            cash_flow_period=args.cash_flow_period)
         if not result:
             continue
 

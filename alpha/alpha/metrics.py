@@ -1,12 +1,13 @@
 from enum import Enum
 from abc import ABC, abstractmethod
-from typing import Dict, List
+from typing import Dict, List, Callable
 from statistics import mean, StatisticsError
 from dataclasses import dataclass
 from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
+
 
 class Metrics(ABC):
     """
@@ -19,13 +20,15 @@ class Metrics(ABC):
         """
         pass
 
-    def print(self, func=print):
+    def print(self, func: Callable[[str], None] = print):
+        """
+        Prints this class nicely (using `func`).
+        """
         func(f"{type(self).__name__}:")
         for k, v in self.__dict__.items():
             func(f"\t{k} = {v}")
 
 
-# TODO: add documentation
 class BacktrackingAnalyser:
     """
     Container for all the metrics, for purposes of statistical analysis.
@@ -51,12 +54,29 @@ class BacktrackingAnalyser:
 
 
     def add_metrics_for(self, company: str, metrics: Metrics):
+        """
+        Adds `metrics` for `company` to internal storage for analysis.
+
+        :param metrics: an object implementing `Metrics`
+        """
         self._metric_data[company] = metrics
 
+
     def add_stock_df_for(self, company: str, stock_df: pd.DataFrame):
+        """
+        Adds `stock_df` for `company` to internal storage for analysis.
+
+        :param stock_df: a `pd.DataFrame` returned by
+            `alpha.DataFetcher.stock_data()`
+        """
         self._stock_data[company] = stock_df
 
+
     def run_analysis(self):
+        """
+        Populates class properties by analysing `self._metric_data` and
+        `self._stock_data`
+        """
         self.no_of_companies = len(self._metric_data)
 
         try:
@@ -75,10 +95,17 @@ class BacktrackingAnalyser:
         except StatisticsError:
             pass
 
+
     def _prediction_was_sucessful(self, stock_df: pd.DataFrame, investing_price: np.float64) -> bool:
+        """
+        Checks whether algorithm decision would actually be profitable if made.
+
+        :param stock_df: The stock data to check against.
+        :param investing_price: The initial buying price of the share
+        """
         relevant_df = stock_df[stock_df.index.date > self._investing_date]
         max_price = relevant_df.max()["high"]
-        if max_price >= self._return_percent * investing_price:
+        if max_price >= (1 + self._return_percent) * investing_price:
             self.amount_exceeded_return_percent += 1
             self.amount_successful += 1
             self.total_returns += max_price - investing_price
