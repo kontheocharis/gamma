@@ -146,6 +146,7 @@ def get_v1_metrics_for(company: str,
 def main():
     # Use command line arguments.
     parser = argparse.ArgumentParser()
+
     parser.add_argument(
         '--data-dir', required=True,
         help="the directory in which the financialmodelingprep data can be found")
@@ -156,15 +157,15 @@ def main():
 
     parser.add_argument(
         '--return-percent', default=1.0, type=float,
-        help="the amount of return that warrants to sell stock before the lookahead period")
+        help="the amount of return that warrants to sell stock before the lookahead period (default: %(default)s)")
 
     parser.add_argument(
         '--lookahead-period', default=3, type=int,
-        help="the max amount of time to wait until selling stock")
+        help="the max amount of time to wait until selling stock (default: %(default)s)")
 
     parser.add_argument(
         '--cash-flow-period', default=3, type=int,
-        help="the amount of years in the past for which cash flow has to be positive")
+        help="the amount of years in the past for which cash flow has to be positive (default: %(default)s)")
 
     args = parser.parse_args()
 
