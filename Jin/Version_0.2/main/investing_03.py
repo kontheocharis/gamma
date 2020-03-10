@@ -1,6 +1,5 @@
 
-# DESCRIPTION --> Calculating metrics and deciding if a stock fits inveting criteria
-
+# DESCRIPTION --> Calculating ratios and checking whether a company fits investing strategy requirements
 
 class calculating_ratios(object):
     
@@ -118,4 +117,6 @@ class investing_strategy_requirements(object):
             self.fulfil_requirements = 1
 
         return self.fulfil_requirements
+
+
 

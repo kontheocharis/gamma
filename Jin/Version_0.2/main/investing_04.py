@@ -1,17 +1,13 @@
 
-# DESCRIPTION --> String interpolation through list of tickers
+# DESCRIPTION --> String interpolation program and getting paths and converting them into dataframes to parse through programs from investing_01.py and investing_02.py
 
-import pandas as pd
-import os
 import json
-import time
-
+import pandas as pd
 
 '''
 # Only uncomment this when testing the code with the file
 
-start_time = time.time()
-
+import os
 
 df_stock_ticker = pd.read_csv("stock_ticker_list_after_parse_up_to_date.csv")
 
@@ -42,7 +38,7 @@ class stock_ticker(object):
         self.df_income_statement = pd.DataFrame.from_dict(self.df_income_statement['financials'])   # Lastly, this converts the file into a dataframe
 
         return self.df_income_statement
-        
+
 
     def string_interpolation_balance_sheet(self):
 
@@ -97,7 +93,6 @@ class stock_ticker(object):
 
 # Only uncomment this when testing the code with the file
 
-
 # To loop through all the files in the .csv file
 #for i in range(size_of_stock_ticker_list):
 for i in range(2):
@@ -105,9 +100,5 @@ for i in range(2):
     temporary_ticker = df_stock_ticker["Stock_Ticker"].iloc[i]    # Temporary ticker is putting each ticker in each path on my desktop to convert json files to databases
     stock_ticker(temporary_ticker).string_interpolation()
 
-
-
-
-print("--- %s seconds ---" % (time.time() - start_time))
 
 '''

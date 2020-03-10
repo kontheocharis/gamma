@@ -1,11 +1,5 @@
 
-# DESCRIPTION --> Analysing dataframe of statements and picking out specific financial data
-
-import pandas as pd
-import numpy as np
-import json 
-
-
+# DESCRIPTION --> Getting metrics from the 3 financial statements
 
 def finding_value_from_year(df, year, metric):  # Purpose of this function is to go through the dataframe (of the financial statements) and get the value of a metric of a specific year
 

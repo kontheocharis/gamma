@@ -1,12 +1,5 @@
 
-# DESCRIPTION --> Analysing dataframe of share price and picking out specific buy and sell data
-
-import pandas as pd
-import numpy as np
-import json 
-import requests
-
-
+# DESCRIPTION --> Getting buy_share_price, sell_share_price & sell_share_price in the event of a 100% gain
 
 
 def finding_value_from_exact_date(df, exact_date):  # Used in the share price function within the class
@@ -34,7 +27,6 @@ def finding_value_from_exact_date(df, exact_date):  # Used in the share price fu
 
 
 
-
 def finding_index_from_exact_date(df, exact_date):  # Used in the share price function within the class
 
     for i in range(len(df)):
@@ -44,7 +36,6 @@ def finding_index_from_exact_date(df, exact_date):  # Used in the share price fu
             date = df['date'].iloc[i]
             index = i
             return index    # Choosing to return the index instead of value to save into a new variable within the funciton (within the class)
-
 
 
 
@@ -74,8 +65,6 @@ class analysing_share_price(object):
 
         #print("The buy_share_price at the beginning of the period is " + str(self.buy_share_price))
         
-
-
 
     '''
     # REDUNDANT NOW --> 

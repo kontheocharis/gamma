@@ -2,11 +2,8 @@
 # DESCRIPTION --> Wrapping all the functions / files and deciding how many times to loop through 
 
 import pandas as pd
-import numpy as np
-import json 
-import os
 import time
-
+import json
 start_time = time.time()
 
 
@@ -14,18 +11,7 @@ from investing_01 import *  # Getting metrics from the 3 financial statements
 from investing_02 import *  # Getting buy_share_price, sell_share_price & sell_share_price in the event of a 100% gain
 from investing_03 import *  # Calculating ratios and checking whether a company fits investing strategy requirements
 from investing_04 import *  # String interpolation program and getting paths and converting them into dataframes to parse through programs from investing_01.py and investing_02.py
-
-from investing_05 import *
-
-
-
-
-'''
-def missing_value_is_zero_at_date(value):   # This function is to skip any company that has 0 for any important metrics (eg total outstanding shares) as this tells me that the API ain't working right
-
-    if value = 0:
-        return True
-'''
+from investing_05 import *  # Adding stocks that pass investment strategy requirement into an array, and from that array, adding stocks which fit my strategy into a second array
 
 
 
@@ -38,21 +24,18 @@ array_of_stocks_that_fulfilled_requirements = []  # The array is for investing_0
 array_of_stocks_that_share_price_increased = []  # The array is for investing_05.py, to input companies (that passed my investment strategy criteria), that has had their share price increased
 
 
-def final_algorithm(no_of_iterations, df_stock_ticker):
 
-     
+def final_algorithm(no_of_iterations, df_stock_ticker, year_to_buy, date_to_buy, date_to_sell):
 
-    # To loop through all the files in the .csv file
-    #for i in range(size_of_stock_ticker_list):
-    #for i in range(2):
-
-    for i in range(no_of_iterations):
+   
+    for i in range(no_of_iterations):   # To loop through all the files in the .csv file
 
         temporary_ticker = df_stock_ticker["Stock_Ticker"].iloc[i]    # Created new variable temporary_ticker is putting each ticker in each path on my desktop to convert json files to databases
         
 
-        # INVESTING_04.PY
+        # INVESTING_04.PY --> String interpolation program and getting paths and converting them into dataframes to parse through programs from investing_01.py and investing_02.py
         class_stock_ticker = stock_ticker(temporary_ticker)
+
         # Creating new variables and asigning variables from functions with the class from investing_04.py
         # Have to created new variables and asign values to them in order to retain the self.variable_name in investing_04.py
         df_income_statement = class_stock_ticker.string_interpolation_income_statement()    # Calling the class from investing_04.py and asgining the value to the df_income_statement variable
@@ -63,10 +46,10 @@ def final_algorithm(no_of_iterations, df_stock_ticker):
 
 
 
-        # INVESTING_01.PY
-        class_analysing_json_files = analysing_json_files(df_income_statement, df_balance_sheet, df_cashflow_statement, "2017", temporary_ticker)     # Calling the class from investing_01.py
+        # INVESTING_01.PY --> Getting metrics from the 3 financial statements
+        class_analysing_json_files = analysing_json_files(df_income_statement, df_balance_sheet, df_cashflow_statement, year_to_buy, temporary_ticker)     # Calling the class from investing_01.py
+
         # Creating new variables and asigning variables from functions with the class from investing_01.py
-        
         # Metrics from INCOME STATEMENT
         eps = class_analysing_json_files.eps_income_statement()
         total_outstanding_shares = class_analysing_json_files.total_outstanding_shares_income_statement()
@@ -91,15 +74,15 @@ def final_algorithm(no_of_iterations, df_stock_ticker):
         # This code is to skip any company that has 0 for any important metrics (eg total outstanding shares) as this tells me that the API ain't working right
         
         # Metrics from INCOME STATEMENT
-        if eps == 0: 
-            continue
+        if eps == 0:    # If the value of EPS = 0
+            continue    # Stop the loop and skip this company --> Data is probably unreliable since EPS has to be greater than 0
 
         if total_outstanding_shares == 0: 
             continue
 
         # Metrics from BALANCE SHEET
         if cash == 0: 
-            continue
+            continue    # Stop the loop and skip this company
 
         if ppe_net == 0: 
             continue
@@ -115,12 +98,13 @@ def final_algorithm(no_of_iterations, df_stock_ticker):
 
         if total_liabilities == 0: 
             continue
-     
+            
+            
 
 
 
-        # INVESTING_02.PY
-        class_analysing_share_price = analysing_share_price(df_share_price, 2, "2017-01-31", "2019-02-01")  # Calling the class from investing_02.py
+        # INVESTING_02.PY --> Getting buy_share_price, sell_share_price & sell_share_price in the event of a 100% gain
+        class_analysing_share_price = analysing_share_price(df_share_price, 2, date_to_buy, date_to_sell)  # Calling the class from investing_02.py
 
         # Value of buy_share_price
         buy_share_price = class_analysing_share_price.buy_share_price()
@@ -131,32 +115,28 @@ def final_algorithm(no_of_iterations, df_stock_ticker):
         # CHECKER --> That buy_share_price and sell_share_price_end_of_period actually contain a value (and ain't 0) --> Otherwise we won't want to analyse these companies
         # This code is to skip any company that has 0 for the buy or sell share_price as this tells me that the company is either too young or has gone private recently
         
-        if buy_share_price == 0:
-            continue 
+        if buy_share_price == 0:    # If the company is too new and does not have data from a date too far back
+            continue    # Stop the loop and skip this company
 
-        if sell_share_price_end_of_period == 0:
-            continue 
+        if sell_share_price_end_of_period == 0:     # If the company has gone private and does not have data from a recent date
+            continue    # Stop the loop and skip this company
 
 
-
-        share_price_of_100_gain = class_analysing_share_price.share_price_of_100_gain()
+        share_price_of_100_gain = class_analysing_share_price.share_price_of_100_gain()     # Share price of 100% gain from buy_share_price (if applicable)
 
         # Value and date of final_sell_share_price
-        final_sell_share_price = class_analysing_share_price.final_sell_share_price()
+        final_sell_share_price = class_analysing_share_price.final_sell_share_price()   # Final sell_share_price -->betwen 100% gain and sell_share_price at the end of period, whichever is greater
         date_of_final_sell_share_price = class_analysing_share_price.date_of_final_sell_share_price()
 
 
 
-
         
-        
-        # INVESTING_03.PY
-        # Calculating all the different ratios using metrics obtained from class in INVESTING_01.PY
+        # INVESTING_03.PY --> Calculating ratios and checking whether a company fits investing strategy requirements
         class_calculating_ratios = calculating_ratios(eps, total_outstanding_shares, cash, ppe_net, total_assets, \
         total_debt, total_liabilities, total_equity, operating_cashflow_0, operating_cashflow_1year_before, \
         operating_cashflow_2year_before, free_cashflow, buy_share_price)
 
-
+        # Calculating all the different ratios using metrics obtained from class in INVESTING_01.PY
         pe_ratio = class_calculating_ratios.pe_ratio()
         years_of_positive_operating_cashflow = class_calculating_ratios.years_of_positive_operating_cashflow()
         debt_to_equity_ratio = class_calculating_ratios.debt_to_equity_ratio()
@@ -167,38 +147,40 @@ def final_algorithm(no_of_iterations, df_stock_ticker):
 
 
         # INVESTING_03.PY
-        class_investing_strategy_requirements = investing_strategy_requirements(pe_ratio, years_of_positive_operating_cashflow, debt_to_equity_ratio, market_cap, cnav1, nav, potential_roi, 5, 3, 1, 10**9, 1)
-        # For reference, numbers mean --> (pe_ratio_requirement, years_of_positive_operating_cashflow_requirement, debt_to_equity_ratio_requirement, market_cap_requirement, potential_roi_requirement)
-        fulfil_requirements = class_investing_strategy_requirements.fulfil_requirements()
+        # Checking if a company fits investment strategy
+        class_investing_strategy_requirements = investing_strategy_requirements(pe_ratio, years_of_positive_operating_cashflow, debt_to_equity_ratio, market_cap, \
+        cnav1, nav, potential_roi, 5, 3, 1, 10**9, 1)   # For reference, numbers mean --> (pe_ratio_requirement, years_of_positive_operating_cashflow_requirement, debt_to_equity_ratio_requirement, market_cap_requirement, potential_roi_requirement)
+        
+        fulfil_requirements = class_investing_strategy_requirements.fulfil_requirements()   # Check whether a company fulfils my given investing strategy requirements
 
-        #print(str(temporary_ticker) + " has been run through and its fulfil_requirements value is " + str(fulfil_requirements))
 
 
 
-        # INVESTING_05.PY
+        # INVESTING_05.PY --> Adding stocks that pass investment strategy requirement into an array, and from that array, adding stocks which fit my strategy into a second array
         class_stocks_that_fulfilled_requirements = stocks_that_fulfilled_requirements(fulfil_requirements, temporary_ticker, buy_share_price, final_sell_share_price)  # To check if the company has fulfilled my investment strategy requirement (aka fulfil_requirements = 1)
 
         if class_stocks_that_fulfilled_requirements.add_ticker_to_array() == True:
             array_of_stocks_that_fulfilled_requirements.append(temporary_ticker)    # To add the company that fulfilled my investment strategy into an array
+            
+            print(temporary_ticker + " meets my investment strategy criteria.")
 
             # Only run the program in investing_05.py that checks if a share price increased if the stock fulfils our investing strategy requirement
             if class_stocks_that_fulfilled_requirements.did_stock_price_increase() == True:
                 array_of_stocks_that_share_price_increased.append(temporary_ticker)     # To add the company that fulfilled my investment strategy AND increased in share price, into an array
 
+    
 
+    rate_of_accuracy = len(array_of_stocks_that_share_price_increased) / len(array_of_stocks_that_fulfilled_requirements) * 100
+
+    print("The rate of accuracy of my investment strategy is " + str(rate_of_accuracy) + "%")
+    print("There are " + str(len(array_of_stocks_that_fulfilled_requirements)) + " stocks that fulfil my investment requirement")
 
 
 
     
-# final_algorithm(2, df_stock_ticker)
-final_algorithm(size_of_stock_ticker_list, df_stock_ticker)
+#final_algorithm(2000, df_stock_ticker, "2017", "2017-01-31", "2019-02-01")
+final_algorithm(size_of_stock_ticker_list, df_stock_ticker, "2015", "2015-01-31", "2018-01-31")
 
 
-accuracy_rate_of_investment_strategy = len(array_of_stocks_that_share_price_increased) / len(array_of_stocks_that_fulfilled_requirements) * 100
-
-print("The rate of accuracy of my investment strategy is " + str(accuracy_rate_of_investment_strategy) + "%")
-
-# print(len(array_of_stocks_that_fulfilled_requirements))
 
 print("--- %s seconds ---" % (time.time() - start_time))
-
