@@ -14,7 +14,7 @@ from investing_04 import *
 # RUNNING UMBRELLA FUNCTIONS TO USE VARIABLES
 # Used function decorators to use the variable outside the function
 
-string_interpolation("aapl")
+string_interpolation("AAPL")
 
 analysing_statements(string_interpolation.URL_income_statement, string_interpolation.URL_balance_sheet, string_interpolation.URL_cashflow_statement)
 analysing_share_price(string_interpolation.URL_share_price, "2016-04-01", "2019-04-01", 2)

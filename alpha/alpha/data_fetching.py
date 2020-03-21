@@ -4,7 +4,7 @@ import hashlib
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Final, Tuple, Optional
+from typing import Tuple, Optional
 from enum import Enum
 
 import pandas as pd
@@ -18,12 +18,7 @@ class Statement(Enum):
 
 
 class DataFetcher(ABC):
-    """
-    An interface to fetch the exact data that is needed for calculating certain
-    investability metrics.
-    """
-
-    FINANCIAL_COLUMNS: Final = (
+    FINANCIAL_COLUMNS = (
         'total_outstanding_shares',
         'eps',
         'cash_short_term_investments',
@@ -35,16 +30,9 @@ class DataFetcher(ABC):
         'operating_cashflow',
     )
 
-    STOCK_COLUMNS: Final = ('high', 'low')
-
+    STOCK_COLUMNS = ('high', 'low')
     @abstractmethod
     def financial_data(self) -> pd.DataFrame:
-        """
-        Gets yearly financial data of company.
-
-        :returns: a date-indexed `pd.DataFrame` with columns
-        `self.FINANCIAL_COLUMNS` and yearly data points.
-        """
         pass
 
     @abstractmethod
@@ -64,16 +52,6 @@ class FmpError(Exception):
     pass
 
 class FmpDataFetcher(DataFetcher):
-    """
-    An implementation of `DataFetcher` using financialmodelingprep.com API
-
-    :param company_symbol: the stock market symbol of the company in question.
-    :param year_range: a tuple in the form `(start_year, end_year)` for which
-        to fetch data
-    :param data_dir: the folder in which the data from financialmodelingprep
-        is located.
-    """
-
     _year_start: int
     _year_end: int
     _symb: str
@@ -135,11 +113,6 @@ class FmpDataFetcher(DataFetcher):
 
 
     def _format_df(self, df: pd.DataFrame, restrict_dates=True) -> pd.DataFrame:
-        """
-        Gets `df` in the right format, including parsing indices and values,
-        and limiting to applicable dates.
-        """
-
         df.index.name = None
         df.index = pd.to_datetime(df.index)
         df = df.apply(pd.to_numeric, errors='raise')
@@ -162,15 +135,6 @@ class FmpDataFetcher(DataFetcher):
 
 
     def _load_resource(self, statement: Statement) -> str:
-        """
-        Loads a url resource.
-
-        If `self._data_dir` exists, loads from there. Otherwise, looks at
-        the cache first (see `self._CACHE_LOCATION`) and returns the resource
-        if present.  If it isn't, fetches the resource at `url`, returns it and
-        updates the cache.
-        """
-
         if self._data_dir:
             with open(os.path.join(self._data_dir,
                                    self._statement_to_string(statement),

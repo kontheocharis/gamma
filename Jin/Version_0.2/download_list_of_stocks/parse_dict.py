@@ -92,7 +92,7 @@ df = pd.DataFrame(df)
 df.columns = ['Stock_Ticker']     # Renaming the column name (which would otherwise be called "0")
 print(df)
 
-df.to_csv('final_stock_ticker_list.csv')    # To save dataframe to a .csv file locally to refer to 
+df.to_csv('stock_ticker_list_after_parse_dict.csv')    # To save dataframe to a .csv file locally to refer to 
 
 
 print("--- %s seconds ---" % (time.time() - start_time))

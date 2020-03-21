@@ -148,9 +148,9 @@ def final_algorithm(no_of_iterations, df_stock_ticker, year_to_buy, date_to_buy,
 
         # INVESTING_03.PY
         # Checking if a company fits investment strategy
-        class_investing_strategy_requirements = investing_strategy_requirements(pe_ratio, years_of_positive_operating_cashflow, debt_to_equity_ratio, market_cap, \
-        cnav1, nav, potential_roi, 5, 3, 1, 10**9, 1)   # For reference, numbers mean --> (pe_ratio_requirement, years_of_positive_operating_cashflow_requirement, debt_to_equity_ratio_requirement, market_cap_requirement, potential_roi_requirement)
-        
+        class_investing_strategy_requirements = investing_strategy_requirements(pe_ratio, years_of_positive_operating_cashflow, debt_to_equity_ratio, market_cap, \        
+        # cnav1, nav, potential_roi, 5, 3, 1, 10**9, 1)   # For reference, numbers mean --> (pe_ratio_requirement, years_of_positive_operating_cashflow_requirement, debt_to_equity_ratio_requirement, market_cap_requirement, potential_roi_requirement)
+
         fulfil_requirements = class_investing_strategy_requirements.fulfil_requirements()   # Check whether a company fulfils my given investing strategy requirements
 
 
@@ -167,6 +167,9 @@ def final_algorithm(no_of_iterations, df_stock_ticker, year_to_buy, date_to_buy,
             # Only run the program in investing_05.py that checks if a share price increased if the stock fulfils our investing strategy requirement
             if class_stocks_that_fulfilled_requirements.did_stock_price_increase() == True:
                 array_of_stocks_that_share_price_increased.append(temporary_ticker)     # To add the company that fulfilled my investment strategy AND increased in share price, into an array
+                
+                # Delete this when eethan leaves
+                print(temporary_ticker)
 
     
 
@@ -178,8 +181,8 @@ def final_algorithm(no_of_iterations, df_stock_ticker, year_to_buy, date_to_buy,
 
 
     
-#final_algorithm(2000, df_stock_ticker, "2017", "2017-01-31", "2019-02-01")
-final_algorithm(size_of_stock_ticker_list, df_stock_ticker, "2015", "2015-01-31", "2018-01-31")
+# final_algorithm(2000, df_stock_ticker, "2017", "2017-01-31", "2019-02-01")
+final_algorithm(size_of_stock_ticker_list, df_stock_ticker, "2017", "2017-01-31", "2019-02-01")
 
 
 
