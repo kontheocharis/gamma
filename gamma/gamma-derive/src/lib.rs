@@ -14,9 +14,7 @@ pub fn count_variants_derive(input: TokenStream) -> TokenStream {
     let name = &input.ident;
     let expanded = quote! {
         impl crate::traits::CountVariants for #name {
-            fn count_variants() -> usize {
-                #len
-            }
+            const COUNT: usize = #len;
         }
     };
     expanded.into()

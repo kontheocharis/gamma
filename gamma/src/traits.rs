@@ -2,5 +2,5 @@
 ///
 /// Meant to be used with `#[derive]`.
 pub trait CountVariants {
-    fn count_variants() -> usize;
+    const COUNT: usize;
 }

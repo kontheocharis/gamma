@@ -80,7 +80,7 @@ impl<'a> Financials where Self: 'a {
     /// Constructs an empty `Financials` instance, mainly used for testing.
     pub fn empty(no_of_companies: usize) -> Financials {
         Financials { 
-            data: Array2::zeros((Field::count_variants(), no_of_companies)),
+            data: Array2::zeros((Field::COUNT, no_of_companies)),
             companies: HashMap::new(),
         }
     }
@@ -143,9 +143,10 @@ impl<'a> Financials where Self: 'a {
 }
 
 
-/// Options to be passed to `Fetcher`
-pub struct FetcherOptions {
-    /// Fetch financials closest to this date. (Never *after* it, though.)
+// TODO: Implement validation.
+/// Options to be passed to `Loader`
+pub struct LoaderOptions {
+    /// Load financials closest to this date. (Never *after* it, though.)
     pub date: NaiveDate,
 
     /// The amount of time before `date` for which cash flows need to be positive in order
@@ -157,10 +158,10 @@ pub struct FetcherOptions {
 /// A trait that can be implemented in order to allow loading `Financials` from any arbitrary data
 /// source.
 #[async_trait]
-pub trait Fetcher {
-    /// The error type returned if fetching the financial data fails.
-    type FetchError: Error;
+pub trait Loader {
+    /// The error type returned if loading the financial data fails.
+    type LoadError: Error;
 
-    /// Fetches financials according to `options`.
-    async fn fetch(&self, options: &FetcherOptions) -> Result<Financials, Self::FetchError>;
+    /// Loads financials according to `options`.
+    async fn load(&mut self, options: &LoaderOptions) -> Result<Financials, Self::LoadError>;
 }

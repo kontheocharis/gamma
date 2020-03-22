@@ -1,4 +1,5 @@
 #![feature(async_closure)]
+#![feature(trait_alias)]
 
 #[macro_use]
 extern crate gamma_derive;
@@ -8,17 +9,16 @@ mod utils;
 
 mod traits;
 mod financials;
-
-// financials::FinancialsFetcher implementors:
 mod simfin;
 
-use log::{debug, error, info, trace, warn};
+use std::env;
 use std::error::{Error};
-use std::mem::{size_of};
+
 use chrono::{NaiveDate, Duration};
+use log::{debug, error, info, trace, warn};
 use tokio::prelude::*;
 
-use crate::financials::{Financials, Field, Fetcher, FetcherOptions};
+use crate::financials::{Financials, Field, Loader, LoaderOptions};
 use crate::traits::{CountVariants};
 
 fn setup_logger() -> Result<(), fern::InitError> {
@@ -39,22 +39,21 @@ fn setup_logger() -> Result<(), fern::InitError> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let args: Vec<String> = env::args().collect();
 
     setup_logger()?;
 
     // let financials = Financials::load("save_test")?;
     // // financials.save("save_test");
 
-    println!("Hello, world!");
+    let mut loader = simfin::Loader::from_local(&args[1]).await?;
 
-    let fetcher = simfin::Fetcher::from_net().await?;
+    // println!("{:#?}", loader);
 
-    println!("{:?}", fetcher);
-
-    // fetcher.fetch(&FetcherOptions {
-    //     date: NaiveDate::from_ymd(2020, 4, 20),
-    //     cash_flows_back: Duration::weeks(52)
-    // }).await?;
+    loader.load(&LoaderOptions {
+        date: NaiveDate::from_ymd(2017, 4, 20),
+        cash_flows_back: Duration::weeks(52)
+    }).await?;
 
     Ok(())
 }
