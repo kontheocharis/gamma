@@ -4,11 +4,12 @@ use std::fmt;
 use std::fs::{File};
 use std::io;
 use std::path::{Path};
+use std::mem::{Rc};
 
 use async_trait::async_trait;
 use bincode::{serialize_into, deserialize_from, Error as BincodeError};
 use chrono::{NaiveDate, Duration};
-use ndarray::{Array2, ArrayView1};
+use ndarray::{Array3, ArrayView2, Axis, Ix1};
 use ndarray_npy::{ReadNpyExt, WriteNpyExt, ReadNpyError, WriteNpyError};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
@@ -17,25 +18,6 @@ use crate::traits::{CountVariants};
 
 const NPY_SAVE_FILE: &str = "data.npy";
 const HASHMAP_SAVE_FILE: &str = "companies.bin";
-
-
-/// Defines all the different types of financial "fields" that the `Financials` struct can hold.
-///
-/// Convertible to and from `usize` for indexing into `Financials`.
-#[repr(usize)]
-#[derive(CountVariants, Debug, IntoPrimitive, TryFromPrimitive)]
-pub enum Field {
-    CashShortTermInvestments,
-    Ppe,
-    TotalLiabilities,
-    TotalAssets,
-    TotalDebt,
-    TotalShareholdersEquity,
-    TotalOutstandingShares,
-    Eps,
-    SharePrice,
-    CashFlowsPositive,
-}
 
 
 /// Error returned by I/O methods on `Financials` (i.e. `save` and `load`).
@@ -62,84 +44,118 @@ impl_from!(IoError {
 
 type IoResult<T> = Result<T, IoError>;
 
+pub mod yearly {
 
-/// Holds all the financial data that is used in analysis.
-///
-/// Provides a strongly-typed way to interface with the different types of financial data described
-/// in the `Field` enum.
-///
-/// Also, it provides a way to save to and load from disk through the `load` and `save` methods.
-#[derive(Debug)]
-pub struct Financials {
-    data: Array2<f32>,
-    companies: HashMap<String, usize>,
+    #[repr(usize)]
+    #[derive(CountVariants, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
+    pub enum Field {
+        CashShortTermInvestments,
+        Ppe,
+        TotalLiabilities,
+        TotalAssets,
+        TotalDebt,
+        TotalShareholdersEquity,
+        TotalOutstandingShares,
+        Eps,
+        SharePriceAtReport,
+        CashFlow
+    }
+
+    pub struct Financials<'a> {
+        pub(parent) companies: &'a HashMap<String, usize>,
+        pub(parent) report_dates: ArrayView1<'a, NaiveDate>,
+        pub(parent) data: ArrayView2<'a, f32>,
+    }
+
+    impl<'a> Financials<'a> {
+        pub fn field(&'a self, field: Field) -> FieldView<'a> {
+            self.data[field.into()]
+        }
+
+        pub fn fields(&'a self) -> impl Iterator<Item=(Field, FieldView<'a>)> {
+            self.data.outer_iter()
+                .enumerate()
+                .map(|(i, data)| (Field::try_from(i).unwrap(), data))
+        }
+
+        pub fn row(&'a self, company: &str) -> Option<RowView<'a>> {
+            self.companies.get(company)
+                .map(|index| (self.report_dates.index_axis(Axis(0), index), self.data.index_axis(Axis(1), index)))
+        }
+    }
+
+    type FieldView<'a> = ArrayView1<'a, f32>;
+    type RowView<'a> = (NaiveDate, ArrayView1<'a, f32>);
 }
 
-impl<'a> Financials where Self: 'a {
+pub mod daily {
 
-    /// Constructs an empty `Financials` instance, mainly used for testing.
-    pub fn empty(no_of_companies: usize) -> Financials {
-        Financials { 
-            data: Array2::zeros((Field::COUNT, no_of_companies)),
-            companies: HashMap::new(),
+    #[repr(usize)]
+    #[derive(CountVariants, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
+    pub enum Field {
+        HighSharePrice,
+        LowSharePrice,
+        Volume,
+    }
+
+    pub struct Financials<'a> {
+        pub(parent) report_dates: ArrayView1<'a, NaiveDate>,
+        pub(parent) data: ArrayView2<'a, f32>,
+    }
+
+    impl<'a> Financials<'a> {
+        pub fn field(&'a self, field: Field) -> FieldView<'a> {
+            (self.report_dates.reborrow(), self.data.index_axis(Axis(0), field.into()))
         }
     }
 
-    /// Constructs a `Financials` instance from an `ndarray::Array2` holding financial data
-    /// and a `HashMap<String, usize>` that maps company symbols to column indices of `data`.
-    ///
-    /// The `data` array's columns are indexed by company, and its rows are indexed by financial
-    /// fields (i.e. the variants of `Field`).
-    pub fn from_raw_parts(data: Array2<f32>, companies: HashMap<String, usize>) -> Financials {
-        Financials { data: data, companies: companies }
-    }
+    type FieldView<'a> = (ArrayView1<'a, NaiveDate>, ArrayView1<'a, f32>);
+}
 
-    /// Loads a `Financials` instance from folder `directory`, where it was previously saved
-    /// through the `save` method.
-    ///
-    /// If `directory` does not exist, `Err(IoError::NotADirectory)` is returned.
-    pub fn load(directory: impl AsRef<Path>) -> IoResult<Financials> {
-        let directory_path = directory.as_ref();
-        if !directory_path.is_dir() {
-            return Err(IoError::NotADirectory(directory_path.into()));
+
+struct YearlyDataElement {
+    pub report_dates: Array1<NaiveDate>,
+    pub data: Array2<f32>,
+}
+
+struct DailyDataElement {
+    pub report_dates: Array1<NaiveDate>,
+    pub data: Array2<f32>,
+}
+
+#[derive(Debug)]
+pub struct FinancialStore {
+    companies: HashMap<String, usize>,
+
+    yearly_years: (u32, u32),
+    yearly_data: Array1<YearlyDataElement>,
+
+    daily_data: Array1<DailyDataElement>,
+}
+
+impl<'a> FinancialStore where Self: 'a {
+    pub fn yearly(&'a self, year: u32) -> Option<yearly::Financials<'a>> {
+        if year < self.yearly_years.0 || year > self.yearly_years.1 {
+            None
+        } else {
+            let year_idx = (year - self.yearly_years.0) as usize;
+
+            Some(yearly::Financials {
+                companies: &self.companies,
+                report_dates: self.yearly_data[year_idx].report_dates.view(),
+                data: self.yearly_data[year_idx].data.view(),
+            })
         }
-
-        Ok(Financials {
-            data: Array2::read_npy(File::open(directory_path.join(NPY_SAVE_FILE))?)?,
-            companies: bincode::deserialize_from(File::open(directory_path.join(HASHMAP_SAVE_FILE))?)?
-        })
     }
 
-    /// Saves a `Financials` instance in folder `directory`. 
-    ///
-    /// If `directory` does not exist, `Err(IoError::NotADirectory)` is returned.
-    pub fn save(&self, directory: impl AsRef<Path>) -> IoResult<()> {
-        let directory_path = directory.as_ref();
-        if !directory_path.is_dir() {
-            return Err(IoError::NotADirectory(directory_path.into()));
-        }
-
-        // Write the numpy file
-        self.data.write_npy(File::create(directory_path.join(NPY_SAVE_FILE))?)?;
-
-        // Write the hashmap
-        bincode::serialize_into(File::create(directory_path.join(HASHMAP_SAVE_FILE))?, &self.companies)?;
-
-        Ok(())
+    pub fn daily(&'a self, company: &str) -> Option<daily::Financials<'a>> {
+        self.companies.get(company)
+            .cloned()
+            .map(|company_idx| daily::Financials {
+                report_dates: self.daily_data[company_idx].report_dates.view(),
+                data: self.daily_data[company_idx].data.view(),
+            })
     }
-
-    /// Selects data of type `field` and returns it as an `ndarray::ArrayView1`, where
-    /// each element corresponds to a different company.
-    pub fn field(&'a self, field: Field) -> ArrayView1<'a, f32> {
-        self.data.row(field as usize)
-    }
-
-    /// Selects data for `company` and returns it as an `ndarray::ArrayView1`, where each element
-    /// corresponds to a different `Field`.
-    pub fn for_company(&'a self, company: &str) -> Option<ArrayView1<'a, f32>> {
-        self.companies.get(company).map(|&index| self.data.column(index))
-    }
-
 }
 
 
