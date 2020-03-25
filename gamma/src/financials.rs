@@ -1,21 +1,18 @@
 use std::error::{Error};
-use std::fmt;
-use std::io;
 use std::path::{Path};
 use std::collections::{HashMap};
 
 use async_trait::async_trait;
 use futures::prelude::*;
-use bincode::{serialize_into, deserialize_from, Error as BincodeError};
-use chrono::{NaiveDate, Duration};
-use ndarray::{Array3, Array2, Array1, ArrayView2, ArrayView1, Axis, Ix1};
-use ndarray_npy::{ReadNpyExt, WriteNpyExt, ReadNpyError, WriteNpyError};
+use chrono::{NaiveDate};
+use ndarray::{Array3, Array2, Array1};
 use thiserror::{Error};
-
-use crate::traits::{CountVariants};
 
 const NPY_SAVE_FILE: &str = "data.npy";
 const HASHMAP_SAVE_FILE: &str = "companies.bin";
+
+const YEARLY_FOLDER: &str = "yearly";
+const DAILY_FOLDER: &str = "daily";
 
 /// Error returned by I/O methods on `Financials` (i.e. `save` and `load`).
 #[derive(Error, Debug)]
@@ -31,8 +28,8 @@ pub mod yearly {
     use std::collections::{HashMap};
 
     use num_enum::{IntoPrimitive, TryFromPrimitive};
-    use ndarray::{Array3, Array2, ArrayView2, ArrayView1, Axis, Ix1};
-    use chrono::{NaiveDate, Duration};
+    use ndarray::{ArrayView2, ArrayView1, Axis};
+    use chrono::{NaiveDate};
 
     #[repr(usize)]
     #[derive(CountVariants, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
@@ -78,9 +75,9 @@ pub mod yearly {
 
 pub mod daily {
     use num_enum::{IntoPrimitive, TryFromPrimitive};
-    use ndarray::{Array3, Array2, ArrayView2, ArrayView1, Axis, Ix1};
-    use chrono::{NaiveDate, Duration};
-    use std::collections::{HashMap};
+    use ndarray::{ArrayView2, ArrayView1, Axis};
+    use chrono::{NaiveDate};
+    
 
     #[repr(usize)]
     #[derive(CountVariants, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
@@ -154,20 +151,20 @@ impl<'a> FinancialStore where Self: 'a {
             })
     }
 
-    pub fn load(storage: FinancialsStorageRepr, options: &LoaderOptions) -> FinancialStore {
+    pub fn load(_storage: StorageRepr, _options: &LoaderOptions) -> FinancialStore {
         unimplemented!()
     }
 
-    pub async fn load_from_path(path: impl AsRef<Path>, options: &LoaderOptions) -> IoResult<FinancialStore> {
+    pub async fn load_from_path(_path: impl AsRef<Path>, _options: &LoaderOptions) -> IoResult<FinancialStore> {
         unimplemented!()
     }
 }
 
 #[derive(Debug)]
-pub struct FinancialsStorageRepr {
-    companies: HashMap<String, usize>,
-    yearly: HashMap<u32, Array2<f32>>,
-    daily: HashMap<u32, Array3<f32>>,
+pub struct StorageRepr {
+    pub companies: HashMap<String, usize>,
+    pub yearly: HashMap<u32, Array2<f32>>,
+    pub daily: HashMap<u32, Array3<f32>>,
 }
 
 pub trait FetcherError = Error;
@@ -187,7 +184,7 @@ pub trait Fetcher {
     type Error: FetcherError;
 
     /// Loads financials according to `options`.
-    async fn to_storage_repr(&mut self) -> Result<FinancialsStorageRepr, Self::Error>;
+    async fn to_storage_repr(&mut self) -> Result<StorageRepr, Self::Error>;
 
     async fn save_to_path<P: AsRef<Path> + Send>(
         &mut self,
@@ -197,28 +194,17 @@ pub trait Fetcher {
         let path_ref = path.as_ref();
         let storage_repr = self.to_storage_repr().await.map_err(FetcherSaveError::FetcherError)?;
 
-        create_if_nonexistent(path_ref).await?;
-        create_if_nonexistent(path_ref.join("yearly")).await?;
-        create_if_nonexistent(path_ref.join("daily")).await?;
+        let path_for = |year: u32, prefix: &str| path_ref.join(prefix).join(year.to_string());
 
-        let year_to_path = |year: u32, prefix: &str| path_ref.join(prefix).join(year.to_string());
-
-        let yearly_iterator = storage_repr.yearly.keys().map(|&year| year_to_path(year, "yearly"));
-        let daily_iterator = storage_repr.yearly.keys().map(|&year| year_to_path(year, "daily"));
-
-        future::try_join_all(yearly_iterator.chain(daily_iterator).map(create_if_nonexistent)).await?;
+        // Create paths needed
+        future::try_join_all({
+            storage_repr.yearly.keys().map(|&year| path_for(year, YEARLY_FOLDER))
+                .chain(storage_repr.daily.keys().map(|&year| path_for(year, DAILY_FOLDER)))
+                .map(tokio::fs::create_dir_all)
+        }).await?;
 
         // TODO
 
-        Ok(())
-    }
-}
-
-async fn create_if_nonexistent<P: AsRef<Path>>(path: P) -> Result<(), std::io::Error> {
-    let path_ref = path.as_ref();
-    if !path_ref.exists() {
-        tokio::fs::create_dir(path_ref).await
-    } else {
-        Ok(())
+        unimplemented!()
     }
 }

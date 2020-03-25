@@ -6,17 +6,9 @@ extern crate gamma_derive;
 
 mod traits;
 mod financials;
-// mod simfin;
+mod simfin;
 
-use std::env;
-use std::error::{Error};
-
-use chrono::{NaiveDate, Duration};
-use log::{debug, error, info, trace, warn};
 use tokio::prelude::*;
-
-use crate::financials::{FinancialStore, Fetcher, yearly, daily};
-use crate::traits::{CountVariants};
 
 fn setup_logger() -> Result<(), fern::InitError> {
     fern::Dispatch::new()
@@ -36,7 +28,7 @@ fn setup_logger() -> Result<(), fern::InitError> {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let args: Vec<String> = env::args().collect();
+    // let args: Vec<String> = env::args().collect();
 
     setup_logger()?;
 
