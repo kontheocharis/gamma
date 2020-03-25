@@ -4,12 +4,9 @@
 #[macro_use]
 extern crate gamma_derive;
 
-#[macro_use]
-mod utils;
-
 mod traits;
 mod financials;
-mod simfin;
+// mod simfin;
 
 use std::env;
 use std::error::{Error};
@@ -18,7 +15,7 @@ use chrono::{NaiveDate, Duration};
 use log::{debug, error, info, trace, warn};
 use tokio::prelude::*;
 
-use crate::financials::{Financials, Field, Loader, LoaderOptions};
+use crate::financials::{FinancialStore, Fetcher, yearly, daily};
 use crate::traits::{CountVariants};
 
 fn setup_logger() -> Result<(), fern::InitError> {
@@ -38,7 +35,7 @@ fn setup_logger() -> Result<(), fern::InitError> {
 
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), anyhow::Error> {
     let args: Vec<String> = env::args().collect();
 
     setup_logger()?;
@@ -46,14 +43,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // let financials = Financials::load("save_test")?;
     // // financials.save("save_test");
 
-    let mut loader = simfin::Loader::from_local(&args[1]).await?;
+    // let mut loader = simfin::Loader::from_local(&args[1]).await?;
 
-    // println!("{:#?}", loader);
+    // // println!("{:#?}", loader);
 
-    loader.load(&LoaderOptions {
-        date: NaiveDate::from_ymd(2017, 4, 20),
-        cash_flows_back: Duration::weeks(52)
-    }).await?;
+    // loader.load(&LoaderOptions {
+    //     date: NaiveDate::from_ymd(2017, 4, 20),
+    //     cash_flows_back: Duration::weeks(52)
+    // }).await?;
 
     Ok(())
 }

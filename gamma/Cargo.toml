@@ -22,3 +22,5 @@ futures = "0.3"
 tokio = { version = "0.2", features = ["full"] }
 zip = "0.5"
 async-trait = "0.1"
+thiserror = "1.0"
+anyhow = "1.0"

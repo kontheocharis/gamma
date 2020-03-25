@@ -12,6 +12,7 @@ use futures::prelude::*;
 use ndarray::{Array2};
 use tokio::io::{BufReader, AsyncBufRead, AsyncBufReadExt};
 use tokio::fs::{File};
+use thiserror::{Error};
 
 use crate::financials::{self, Financials};
 use crate::traits::{CountVariants};
@@ -24,34 +25,18 @@ const SHARE_PRICES_FILENAME:     &str = "us-shareprices-daily.csv";
 
 const READ_CAPACITY: usize = 1 << 15;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum FromLocalError {
-    IoError(std::io::Error),
+    #[error("I/O Error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error(
+        "Files need to be named: {}, {}, {}, {}",
+        BALANCE_SHEET_FILENAME, CASH_FLOW_FILENAME,
+        INCOME_STATEMENT_FILENAME, SHARE_PRICES_FILENAME
+    )]
     FileNotFound(PathBuf),
 }
-
-impl_from!(FromLocalError {
-    IoError => { std::io::Error }
-});
-
-impl fmt::Display for FromLocalError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::IoError(ref error) => write!(f, "{}", error),
-            Self::FileNotFound(ref file) => {
-                write!(f, "The following file was not found: {}", file.display())?;
-                write!(
-                    f, "Files need to be named: {}, {}, {}, {}",
-                    BALANCE_SHEET_FILENAME, CASH_FLOW_FILENAME,
-                    INCOME_STATEMENT_FILENAME, SHARE_PRICES_FILENAME
-                )
-            },
-        }
-    }
-}
-
-impl Error for FromLocalError {}
-
 
 pub trait LoaderRead = AsyncBufRead + Sync + Send + Unpin;
 
@@ -92,29 +77,17 @@ impl Loader<BufReader<File>> {
 }
 
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum LoadError {
-    IoError(std::io::Error),
+    #[error("I/O Error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("File parsing error: {0}")]
     FileParsingError(String),
-    DateParsingError(chrono::format::ParseError),
+
+    #[error("Date parsing error: {0}")]
+    DateParsingError(#[from] chrono::format::ParseError),
 }
-
-impl_from!(LoadError {
-    IoError => { std::io::Error },
-    DateParsingError => { chrono::format::ParseError }
-});
-
-impl fmt::Display for LoadError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::IoError(ref error) => write!(f, "{}", error),
-            Self::FileParsingError(ref msg) => write!(f, "{}", msg),
-            Self::DateParsingError(ref error) => write!(f, "{}", error),
-        }
-    }
-}
-
-impl Error for LoadError {}
 
 
 #[derive(Debug)]

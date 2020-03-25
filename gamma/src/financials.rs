@@ -1,50 +1,38 @@
-use std::collections::{HashMap};
 use std::error::{Error};
 use std::fmt;
-use std::fs::{File};
 use std::io;
 use std::path::{Path};
-use std::mem::{Rc};
+use std::collections::{HashMap};
 
 use async_trait::async_trait;
+use futures::prelude::*;
 use bincode::{serialize_into, deserialize_from, Error as BincodeError};
 use chrono::{NaiveDate, Duration};
-use ndarray::{Array3, ArrayView2, Axis, Ix1};
+use ndarray::{Array3, Array2, Array1, ArrayView2, ArrayView1, Axis, Ix1};
 use ndarray_npy::{ReadNpyExt, WriteNpyExt, ReadNpyError, WriteNpyError};
-use num_enum::{IntoPrimitive, TryFromPrimitive};
+use thiserror::{Error};
 
 use crate::traits::{CountVariants};
-
 
 const NPY_SAVE_FILE: &str = "data.npy";
 const HASHMAP_SAVE_FILE: &str = "companies.bin";
 
-
 /// Error returned by I/O methods on `Financials` (i.e. `save` and `load`).
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum IoError {
-    NotADirectory(Box<Path>),
-    Internal(Box<dyn Error>),
+    #[error(transparent)]
+    Internal(#[from] std::io::Error),
 }
-
-impl fmt::Display for IoError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NotADirectory(ref path) => write!(f, "{} is an invalid/nonexistent directory.", path.display()),
-            Self::Internal(ref error) => write!(f, "{}", error)
-        }
-    }
-}
-
-impl Error for IoError { }
-
-impl_from!(IoError {
-    Internal => { BincodeError, io::Error, ReadNpyError, WriteNpyError }
-});
 
 type IoResult<T> = Result<T, IoError>;
 
 pub mod yearly {
+    use std::convert::{TryFrom};
+    use std::collections::{HashMap};
+
+    use num_enum::{IntoPrimitive, TryFromPrimitive};
+    use ndarray::{Array3, Array2, ArrayView2, ArrayView1, Axis, Ix1};
+    use chrono::{NaiveDate, Duration};
 
     #[repr(usize)]
     #[derive(CountVariants, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
@@ -62,14 +50,14 @@ pub mod yearly {
     }
 
     pub struct Financials<'a> {
-        pub(parent) companies: &'a HashMap<String, usize>,
-        pub(parent) report_dates: ArrayView1<'a, NaiveDate>,
-        pub(parent) data: ArrayView2<'a, f32>,
+        pub(super) companies: &'a HashMap<String, usize>,
+        pub(super) report_dates: ArrayView1<'a, NaiveDate>,
+        pub(super) data: ArrayView2<'a, f32>,
     }
 
     impl<'a> Financials<'a> {
         pub fn field(&'a self, field: Field) -> FieldView<'a> {
-            self.data[field.into()]
+            self.data.index_axis(Axis(0), field.into())
         }
 
         pub fn fields(&'a self) -> impl Iterator<Item=(Field, FieldView<'a>)> {
@@ -80,7 +68,7 @@ pub mod yearly {
 
         pub fn row(&'a self, company: &str) -> Option<RowView<'a>> {
             self.companies.get(company)
-                .map(|index| (self.report_dates.index_axis(Axis(0), index), self.data.index_axis(Axis(1), index)))
+                .map(|&index| (self.report_dates[index], self.data.index_axis(Axis(1), index)))
         }
     }
 
@@ -89,6 +77,10 @@ pub mod yearly {
 }
 
 pub mod daily {
+    use num_enum::{IntoPrimitive, TryFromPrimitive};
+    use ndarray::{Array3, Array2, ArrayView2, ArrayView1, Axis, Ix1};
+    use chrono::{NaiveDate, Duration};
+    use std::collections::{HashMap};
 
     #[repr(usize)]
     #[derive(CountVariants, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
@@ -99,8 +91,8 @@ pub mod daily {
     }
 
     pub struct Financials<'a> {
-        pub(parent) report_dates: ArrayView1<'a, NaiveDate>,
-        pub(parent) data: ArrayView2<'a, f32>,
+        pub(super) report_dates: ArrayView1<'a, NaiveDate>,
+        pub(super) data: ArrayView2<'a, f32>,
     }
 
     impl<'a> Financials<'a> {
@@ -112,12 +104,13 @@ pub mod daily {
     type FieldView<'a> = (ArrayView1<'a, NaiveDate>, ArrayView1<'a, f32>);
 }
 
-
+#[derive(Debug)]
 struct YearlyDataElement {
     pub report_dates: Array1<NaiveDate>,
     pub data: Array2<f32>,
 }
 
+#[derive(Debug)]
 struct DailyDataElement {
     pub report_dates: Array1<NaiveDate>,
     pub data: Array2<f32>,
@@ -126,11 +119,15 @@ struct DailyDataElement {
 #[derive(Debug)]
 pub struct FinancialStore {
     companies: HashMap<String, usize>,
-
     yearly_years: (u32, u32),
     yearly_data: Array1<YearlyDataElement>,
-
     daily_data: Array1<DailyDataElement>,
+}
+
+#[derive(Debug)]
+pub struct LoaderOptions {
+    /// Load financials closest to this date. (Never *after* it, though.)
+    pub date: NaiveDate,
 }
 
 impl<'a> FinancialStore where Self: 'a {
@@ -156,28 +153,72 @@ impl<'a> FinancialStore where Self: 'a {
                 data: self.daily_data[company_idx].data.view(),
             })
     }
+
+    pub fn load(storage: FinancialsStorageRepr, options: &LoaderOptions) -> FinancialStore {
+        unimplemented!()
+    }
+
+    pub async fn load_from_path(path: impl AsRef<Path>, options: &LoaderOptions) -> IoResult<FinancialStore> {
+        unimplemented!()
+    }
 }
 
-
-// TODO: Implement validation.
-/// Options to be passed to `Loader`
-pub struct LoaderOptions {
-    /// Load financials closest to this date. (Never *after* it, though.)
-    pub date: NaiveDate,
-
-    /// The amount of time before `date` for which cash flows need to be positive in order
-    /// for `Field::CashFlowsPositive` to be `1.0`.
-    pub cash_flows_back: Duration,
+#[derive(Debug)]
+pub struct FinancialsStorageRepr {
+    companies: HashMap<String, usize>,
+    yearly: HashMap<u32, Array2<f32>>,
+    daily: HashMap<u32, Array3<f32>>,
 }
 
+pub trait FetcherError = Error;
 
-/// A trait that can be implemented in order to allow loading `Financials` from any arbitrary data
-/// source.
+#[derive(Error, Debug)]
+pub enum FetcherSaveError<T: FetcherError> {
+    #[error("I/O error while saving: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("Fetcher error while saving: {0}")]
+    FetcherError(T),
+}
+
 #[async_trait]
-pub trait Loader {
+pub trait Fetcher {
     /// The error type returned if loading the financial data fails.
-    type LoadError: Error;
+    type Error: FetcherError;
 
     /// Loads financials according to `options`.
-    async fn load(&mut self, options: &LoaderOptions) -> Result<Financials, Self::LoadError>;
+    async fn to_storage_repr(&mut self) -> Result<FinancialsStorageRepr, Self::Error>;
+
+    async fn save_to_path<P: AsRef<Path> + Send>(
+        &mut self,
+        path: P
+    ) -> Result<(), FetcherSaveError<Self::Error>>
+    {
+        let path_ref = path.as_ref();
+        let storage_repr = self.to_storage_repr().await.map_err(FetcherSaveError::FetcherError)?;
+
+        create_if_nonexistent(path_ref).await?;
+        create_if_nonexistent(path_ref.join("yearly")).await?;
+        create_if_nonexistent(path_ref.join("daily")).await?;
+
+        let year_to_path = |year: u32, prefix: &str| path_ref.join(prefix).join(year.to_string());
+
+        let yearly_iterator = storage_repr.yearly.keys().map(|&year| year_to_path(year, "yearly"));
+        let daily_iterator = storage_repr.yearly.keys().map(|&year| year_to_path(year, "daily"));
+
+        future::try_join_all(yearly_iterator.chain(daily_iterator).map(create_if_nonexistent)).await?;
+
+        // TODO
+
+        Ok(())
+    }
+}
+
+async fn create_if_nonexistent<P: AsRef<Path>>(path: P) -> Result<(), std::io::Error> {
+    let path_ref = path.as_ref();
+    if !path_ref.exists() {
+        tokio::fs::create_dir(path_ref).await
+    } else {
+        Ok(())
+    }
 }
