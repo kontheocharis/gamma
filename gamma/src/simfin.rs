@@ -1,18 +1,19 @@
 use std::collections::{HashMap};
-use std::fmt;
 use std::error::{Error};
-use std::path::{Path, PathBuf};
+use std::fmt;
 use std::marker::{Sync, Send, Unpin};
+use std::path::{Path, PathBuf};
 
-use log::{debug, error, info, trace, warn};
 use async_trait::async_trait;
 use chrono::{NaiveDate, Duration, Datelike};
 use futures::future::TryFutureExt;
 use futures::prelude::*;
+use log::{debug, error, info, trace, warn};
 use ndarray::{Array2};
-use tokio::io::{BufReader, AsyncBufRead, AsyncBufReadExt};
-use tokio::fs::{File};
+use phf::{phf_map, phf_set};
 use thiserror::{Error};
+use tokio::fs::{File};
+use tokio::io::{BufReader, AsyncBufRead, AsyncBufReadExt};
 
 use crate::financials::{self};
 use crate::traits::{CountVariants};
@@ -107,7 +108,7 @@ async fn parse_csv<R: LoaderRead>(
         min_year: std::u32::MAX,
         max_year: std::u32::MIN,
     };
-
+    
     let mut headers: HashMap<String, usize> = HashMap::new();
 
     const SEP: char = ';';
@@ -170,7 +171,6 @@ async fn parse_csv<R: LoaderRead>(
     Ok(parsed)
 }
 
-
 #[async_trait]
 impl<R: LoaderRead> financials::Fetcher for Loader<R> {
     type Error = LoadError;
@@ -183,7 +183,7 @@ impl<R: LoaderRead> financials::Fetcher for Loader<R> {
             "Total Assets",
             "Total Liabilities",
             "Total Equity",
-            "Long Term Debt",
+            "Long Term Debt", // + Short term
         ];
 
         const IS_FIELDS: &[&str] = &[
