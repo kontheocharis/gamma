@@ -4,29 +4,31 @@
 #[macro_use]
 extern crate gamma_derive;
 
-mod traits;
 mod financials;
-mod simfin;
+// mod simfin;
+mod traits;
 
 use async_trait::async_trait;
+use chrono::NaiveDate;
 use ndarray::{Array2, Array3};
 use std::collections::{HashMap};
-use thiserror::{Error};
+use thiserror::Error;
 use tokio::prelude::*;
-use chrono::{NaiveDate};
 
-use crate::financials::{Fetcher, StorageRepr, FinancialStore, LoaderOptions};
-use crate::traits::{CountVariants};
+use crate::financials::{Fetcher, Financials, LoaderOptions, StorageRepr};
+use crate::traits::CountVariants;
 
 fn setup_logger() -> Result<(), fern::InitError> {
     fern::Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
-                    "{}[{}][{}] {}",
-                    chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
-                    record.target(),
-                    record.level(),
-                    message)) })
+                "{}[{}][{}] {}",
+                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
+                record.target(),
+                record.level(),
+                message
+            ))
+        })
         .level(log::LevelFilter::Debug)
         .chain(std::io::stdout())
         .apply()?;
@@ -48,7 +50,7 @@ impl Fetcher for MockFetcher {
         let mut repr = StorageRepr {
             companies: HashMap::new(),
             yearly: HashMap::new(),
-            daily: HashMap::new()
+            daily: HashMap::new(),
         };
 
         repr.companies.insert("AAPL".to_string(), 0);
@@ -56,18 +58,31 @@ impl Fetcher for MockFetcher {
         repr.companies.insert("GOOG".to_string(), 2);
         repr.companies.insert("SNAP".to_string(), 3);
 
-        repr.yearly.insert(2018, Array2::zeros((financials::yearly::Field::COUNT + 1, 4)));
-        repr.yearly.insert(2019, Array2::zeros((financials::yearly::Field::COUNT + 1, 4)));
-        repr.yearly.insert(2020, Array2::zeros((financials::yearly::Field::COUNT + 1, 4)));
+        repr.yearly
+            .insert(2018, Array2::zeros((financials::YearlyField::COUNT, 4)));
+        repr.yearly
+            .insert(2019, Array2::zeros((financials::YearlyField::COUNT, 4)));
+        repr.yearly
+            .insert(2020, Array2::zeros((financials::YearlyField::COUNT, 4)));
+        repr.yearly
+            .insert(2021, Array2::zeros((financials::YearlyField::COUNT, 4)));
+        repr.yearly
+            .insert(2022, Array2::zeros((financials::YearlyField::COUNT, 4)));
 
-        repr.daily.insert(2018, Array3::zeros((financials::yearly::Field::COUNT + 1, 4, 365)));
-        repr.daily.insert(2019, Array3::zeros((financials::yearly::Field::COUNT + 1, 4, 365)));
-        repr.daily.insert(2020, Array3::zeros((financials::yearly::Field::COUNT + 1, 4, 366)));
+        repr.daily
+            .insert(2017, Array3::zeros((365, financials::DailyField::COUNT, 4)));
+        repr.daily
+            .insert(2018, Array3::zeros((365, financials::DailyField::COUNT, 4)));
+        repr.daily
+            .insert(2019, Array3::zeros((365, financials::DailyField::COUNT, 4)));
+        repr.daily
+            .insert(2020, Array3::zeros((366, financials::DailyField::COUNT, 4)));
+        repr.daily
+            .insert(2021, Array3::zeros((366, financials::DailyField::COUNT, 4)));
 
         Ok(repr)
     }
 }
-
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -77,12 +92,17 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut fetcher = MockFetcher;
     let repr = fetcher.to_storage_repr().await?;
 
-    let store = FinancialStore::load(repr, &LoaderOptions {
-        from: NaiveDate::from_ymd(2010, 3, 14),
-        to: NaiveDate::from_ymd(2020, 3, 14)
-    });
+    let store = Financials::load(
+        repr,
+        &LoaderOptions {
+            yearly_min: 2018,
+            yearly_max: 2020,
+            daily_min: NaiveDate::from_ymd(2018, 3, 14),
+            daily_max: NaiveDate::from_ymd(2020, 12, 10),
+        },
+    )?;
 
-    println!("{:#?}", &store);
+    println!("{:#?}", store);
 
     // let financials = Financials::load("save_test")?;
     // // financials.save("save_test");
