@@ -1,8 +1,7 @@
 '''
-1. This file is to take the company tickers and indexes in df_companytickers
+1. This file is to take the company tickers and asign an index to them
 2. And put it into a dictionary
 3. Download the dictionary into a .json file locally
-4. The purpose is to use this .json file when creating an empty 3D array 
 
 '''
 
@@ -10,16 +9,29 @@
 import pandas as pd
 import json
 
-df_companytickers = pd.read_excel(r'companytickers.xlsx')   # To read the excel file
+
+df_shareprices = pd.read_pickle('daily_shareprices.pkl')   # Converting .pkl file into a dataframe 
 
 
 dict_companytickers = {     # Creating an empty dictionary to add keys and values in the iteration
 
 }
 
-for i in range(len(df_companytickers)):
 
-    dict_companytickers[ str(df_companytickers['Ticker'].iloc[i]) ] = i     # To create the dictionary and pairing companyticker with index
+
+
+temporary_ticker = ''   # Empty string to input newly found stock ticker later in the loop
+index = 0
+
+for i in range(len(df_shareprices)):
+
+    if str( df_shareprices['Ticker'].iloc[i] ) != temporary_ticker:
+
+        temporary_ticker = str( df_shareprices['Ticker'].iloc[i] )
+
+        dict_companytickers[ temporary_ticker ] = index    # Can't use i since that represents looping through all the tickers
+        index = index + 1
+
 
 
 

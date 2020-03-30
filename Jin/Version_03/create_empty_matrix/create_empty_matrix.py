@@ -12,6 +12,7 @@ import numpy as np
 
 '''
 
+import pickle
 
 
 from calculate_days_inbetween import *
@@ -21,35 +22,22 @@ import json
 with open('dict_companytickers.json') as f:     # Importing .json file of dictionary of company tickers and indices
   dict_companytickers = json.load(f)
 
-no_of_companytickers = len(dict_companytickers)     # To get the number of indices of company tickers (which will be needed to set the no of rows in the matrix)
-
-
-
 
 days_inbetween = calculate_days_inbetween()     # Calling function from another file to get the no of days in-between the date bounds
 
-array_days_inbetween = []     # Empty array to add the indices of no of days in-between the 2 date bounds (first date and last date)
+
+no_of_tickers = len(dict_companytickers)  # Getting the number of company tickers to create matrix
+days_inbetween = calculate_days_inbetween()     # Getting the number of days in-between date bounds to create matrix
 
 
-for i in range(days_inbetween): 
-
-    array_days_inbetween.append(i)    # This iteration is to give me an array of all the indices of companytickers
-
+# (columns, rows)
+matrix = np.full( (days_inbetween, no_of_tickers), np.NaN, dtype = np.float32)  # Creating the matrix as a numpy multi-dimensional array
 
 
+# print(matrix)
 
 
-# np.empty( (rows, columns) )
-empty_matrix = np.empty((no_of_companytickers, days_inbetween))    # Creating an empty matrix with random values
-
-empty_matrix[:] = np.NaN  # Asigning Nan as values in the empty array 
-
-
-
-
-
-matrix = pd.DataFrame(data = empty_matrix, columns = array_days_inbetween)  # The parameters has to be arrays
-
-
-print(matrix)
-
+# Download to .pkl file locally
+output = open('empty_matrix.pkl', 'wb')
+pickle.dump(matrix, output)
+output.close()
