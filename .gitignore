@@ -1,5 +1,6 @@
 # Jin --- CUSTOM ---
 data_simfin/
+**/Jin/Version_03/create_empty_matrix/daily_shareprices.pkl
 
 # --- CUSTOM ---
 cache/
