@@ -15,7 +15,7 @@ use std::collections::{HashMap};
 use thiserror::Error;
 use tokio::prelude::*;
 
-use crate::financials::{Fetcher, Financials, LoaderOptions, StorageRepr};
+use crate::financials::{Financials, LoadOptions, fetcher::{Fetcher, StorageRepr}};
 use crate::traits::CountVariants;
 
 fn setup_logger() -> Result<(), fern::InitError> {
@@ -44,9 +44,9 @@ struct MockFetcherError;
 
 #[async_trait]
 impl Fetcher for MockFetcher {
-    type Error = MockFetcherError;
+    type StorageReprError = MockFetcherError;
 
-    async fn to_storage_repr(&mut self) -> Result<StorageRepr, Self::Error> {
+    async fn to_storage_repr(&mut self) -> Result<StorageRepr, Self::StorageReprError> {
         let mut repr = StorageRepr {
             companies: HashMap::new(),
             yearly: HashMap::new(),
@@ -90,19 +90,21 @@ async fn main() -> Result<(), anyhow::Error> {
     setup_logger()?;
 
     let mut fetcher = MockFetcher;
-    let repr = fetcher.to_storage_repr().await?;
+    // let repr = fetcher.to_storage_repr().await?;
 
-    let store = Financials::load(
-        repr,
-        &LoaderOptions {
+    // repr.save_to_path(&args[1]).await?;
+
+    let fin = Financials::from_path(
+        &args[1],
+        &LoadOptions {
             yearly_min: 2018,
             yearly_max: 2020,
             daily_min: NaiveDate::from_ymd(2018, 3, 14),
             daily_max: NaiveDate::from_ymd(2020, 12, 10),
         },
-    )?;
+    ).await?;
 
-    println!("{:#?}", store);
+    println!("{:#?}", fin);
 
     // let financials = Financials::load("save_test")?;
     // // financials.save("save_test");
