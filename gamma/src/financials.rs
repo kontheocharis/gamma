@@ -80,7 +80,6 @@ where
         options: &LoadOptions,
     ) -> Result<Financials, anyhow::Error> {
         options.ensure_ok()?;
-
         Self::from_repr_unchecked(repr, options)
     }
 
@@ -89,10 +88,14 @@ where
         options: &LoadOptions,
     ) -> Result<Financials, anyhow::Error> {
         let path_ref = path.as_ref();
-
         options.ensure_ok()?;
 
-        let repr = fetcher::StorageRepr::load_from_path(path_ref).await?;
+        let repr = fetcher::StorageRepr::load_from_path(
+            path_ref,
+            (options.yearly_min, options.yearly_max),
+            (options.daily_min.year(), options.daily_max.year()),
+        )
+        .await?;
 
         Self::from_repr_unchecked(repr, options)
     }
@@ -177,6 +180,7 @@ where
 
 pub mod fetcher {
     use super::*;
+
     use anyhow::anyhow;
     use futures::stream::{StreamExt, TryStreamExt};
     use tokio::fs::{self, File};
@@ -210,7 +214,11 @@ pub mod fetcher {
     pub struct InvalidYearFilenameError;
 
     impl StorageRepr {
-        pub async fn load_from_path<P: AsRef<Path>>(path: P) -> Result<StorageRepr, anyhow::Error> {
+        pub async fn load_from_path<P: AsRef<Path>>(
+            path: P,
+            yearly_years: (i32, i32),
+            daily_years: (i32, i32),
+        ) -> Result<StorageRepr, anyhow::Error> {
             let path_ref = path.as_ref();
 
             let (yearly_folder, daily_folder, company_file) = (
@@ -223,39 +231,43 @@ pub mod fetcher {
                 return Err(MissingFoldersError)?;
             }
 
-            async fn deserialize_from_path<'a, T: serde::de::DeserializeOwned>(
+            async fn deserialize_from_path<T: serde::de::DeserializeOwned>(
                 path: &PathBuf,
             ) -> Result<T, anyhow::Error> {
-                let mut data = Vec::new();
-                File::open(path).await?.read_to_end(&mut data).await?;
+                let mut file = File::open(path).await?;
+                let mut data = Vec::with_capacity(file.metadata().await?.len() as usize);
+                file.read_to_end(&mut data).await?;
                 Ok(bincode::deserialize(&data)?)
             }
 
             macro_rules! get_time_series_for {
-                ($folder:expr, $return_type:ty) => {
+                ($folder:expr, $return_type:ty, $range_tuple:expr) => {
                     fs::read_dir($folder)
                         .await?
-                        .then(
-                            async move |entry| -> Result<(i32, $return_type), anyhow::Error> {
-                                let entry = entry?;
-                                let year = str::parse::<i32>(
-                                    &entry
-                                        .file_name()
-                                        .into_string()
-                                        .map_err(|_| InvalidYearFilenameError)?,
-                                )
-                                .map_err(|_| InvalidYearFilenameError)?;
-
-                                Ok((year, deserialize_from_path(&entry.path()).await?))
-                            },
-                        )
+                        .map(|entry| -> Result<_, anyhow::Error> {
+                            let entry = entry?;
+                            let year = entry
+                                .file_name()
+                                .to_str()
+                                .and_then(|s| s.parse::<i32>().ok())
+                                .ok_or(InvalidYearFilenameError)?;
+                            Ok((year, entry.path()))
+                        })
+                        .try_filter(|(year, _)| {
+                            future::ready(year >= &($range_tuple).0 && year <= &($range_tuple).1)
+                        })
+                        .and_then(async move |(year, path)| {
+                            deserialize_from_path(&path)
+                                .map_ok(|data| (year, data))
+                                .await
+                        })
                         .try_collect::<HashMap<i32, $return_type>>()
                 };
             }
 
             let companies_fut = deserialize_from_path::<HashMap<String, usize>>(&company_file);
-            let yearly_fut = get_time_series_for!(&yearly_folder, Array2<f32>);
-            let daily_fut = get_time_series_for!(&daily_folder, Array3<f32>);
+            let yearly_fut = get_time_series_for!(&yearly_folder, Array2<f32>, yearly_years);
+            let daily_fut = get_time_series_for!(&daily_folder, Array3<f32>, daily_years);
 
             let (companies, yearly, daily) =
                 future::try_join3(companies_fut, yearly_fut, daily_fut).await?;
