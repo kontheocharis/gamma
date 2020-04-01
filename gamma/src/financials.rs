@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use chrono::{Datelike, NaiveDate};
 use futures::prelude::*;
-use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, Axis};
+use ndarray::{s, Array2, Array3, ArrayView3, Axis};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 use tokio::fs;
@@ -38,15 +38,8 @@ pub enum DailyField {
     Volume,
 }
 
-#[derive(Debug)]
-pub struct Financials {
-    companies: HashMap<String, usize>,
-    yearly_data: Array3<f32>, // Axis(0): year, Axis(1): x::Field, Axis(2): company
-    daily_data: Array3<f32>,  // Axis(0): day, Axis(1): x::Field, Axis(2): company
-}
-
 #[derive(Debug, Clone)]
-pub struct LoadOptions {
+pub struct Options {
     pub yearly_min: i32,
     pub yearly_max: i32,
     pub daily_min: NaiveDate,
@@ -57,7 +50,7 @@ pub struct LoadOptions {
 #[error("Invalid options: {0}")]
 pub struct InvalidOptionsError(String);
 
-impl LoadOptions {
+impl Options {
     pub fn ensure_ok(&self) -> Result<(), InvalidOptionsError> {
         if self.yearly_min < self.yearly_max && self.daily_min < self.daily_max {
             Ok(())
@@ -65,6 +58,14 @@ impl LoadOptions {
             Err(InvalidOptionsError("invalid date ranges".to_string()))
         }
     }
+}
+
+#[derive(Debug)]
+pub struct Financials {
+    companies: HashMap<String, usize>,
+    options: Options,
+    yearly_data: Array3<f32>, // Axis(0): year, Axis(1): x::Field, Axis(2): company
+    daily_data: Array3<f32>,  // Axis(0): day, Axis(1): x::Field, Axis(2): company
 }
 
 impl<'a> Financials
@@ -75,9 +76,49 @@ where
     pub const FIELD_AXIS: Axis = Axis(1);
     pub const COMPANY_AXIS: Axis = Axis(2);
 
+    pub fn yearly(&'a self) -> ArrayView3<'a, f32> {
+        self.yearly_data.view()
+    }
+
+    pub fn daily(&'a self) -> ArrayView3<'a, f32> {
+        self.daily_data.view()
+    }
+
+    pub fn index_to_year(&self, index: usize) -> i32 {
+        index as i32 + self.options.yearly_min
+    }
+
+    pub fn year_to_index(&self, year: i32) -> usize {
+        (year - self.options.yearly_min) as usize
+    }
+
+    pub fn index_to_date(&self, index: usize) -> NaiveDate {
+        NaiveDate::from_num_days_from_ce(index as i32 + self.options.daily_min.num_days_from_ce())
+    }
+
+    pub fn date_to_index(&self, date: NaiveDate) -> usize {
+        (date.num_days_from_ce() - self.options.daily_min.num_days_from_ce()) as usize
+    }
+
+    pub fn year_range(&self) -> (i32, i32) {
+        (self.options.yearly_min, self.options.yearly_max)
+    }
+
+    pub fn date_range(&self) -> (NaiveDate, NaiveDate) {
+        (self.options.daily_min, self.options.daily_max)
+    }
+
+    pub fn valid_year_index(&self, index: usize) -> bool {
+        index < self.yearly_data.len_of(Self::TIME_AXIS)
+    }
+
+    pub fn valid_date_index(&self, index: usize) -> bool {
+        index < self.daily_data.len_of(Self::TIME_AXIS)
+    }
+
     pub fn from_repr(
         repr: fetcher::StorageRepr,
-        options: &LoadOptions,
+        options: Options,
     ) -> Result<Financials, anyhow::Error> {
         options.ensure_ok()?;
         Self::from_repr_unchecked(repr, options)
@@ -85,7 +126,7 @@ where
 
     pub async fn from_path<P: AsRef<Path>>(
         path: P,
-        options: &LoadOptions,
+        options: Options,
     ) -> Result<Financials, anyhow::Error> {
         let path_ref = path.as_ref();
         options.ensure_ok()?;
@@ -102,7 +143,7 @@ where
 
     fn from_repr_unchecked(
         repr: fetcher::StorageRepr,
-        options: &LoadOptions,
+        options: Options,
     ) -> Result<Financials, anyhow::Error> {
         let no_of_companies = repr.companies.len();
 
@@ -172,6 +213,7 @@ where
 
         Ok(Financials {
             companies: repr.companies,
+            options,
             yearly_data,
             daily_data,
         })
@@ -240,34 +282,36 @@ pub mod fetcher {
                 Ok(bincode::deserialize(&data)?)
             }
 
-            macro_rules! get_time_series_for {
-                ($folder:expr, $return_type:ty, $range_tuple:expr) => {
-                    fs::read_dir($folder)
-                        .await?
-                        .map(|entry| -> Result<_, anyhow::Error> {
-                            let entry = entry?;
-                            let year = entry
-                                .file_name()
-                                .to_str()
-                                .and_then(|s| s.parse::<i32>().ok())
-                                .ok_or(InvalidYearFilenameError)?;
-                            Ok((year, entry.path()))
-                        })
-                        .try_filter(|(year, _)| {
-                            future::ready(year >= &($range_tuple).0 && year <= &($range_tuple).1)
-                        })
-                        .and_then(async move |(year, path)| {
-                            deserialize_from_path(&path)
-                                .map_ok(|data| (year, data))
-                                .await
-                        })
-                        .try_collect::<HashMap<i32, $return_type>>()
-                };
+            async fn get_time_series_for<T: serde::de::DeserializeOwned>(
+                folder: &PathBuf,
+                year_range: (i32, i32),
+            ) -> Result<HashMap<i32, T>, anyhow::Error> {
+                fs::read_dir(folder)
+                    .await?
+                    .map(|entry| {
+                        let entry = entry?;
+                        let year = entry
+                            .file_name()
+                            .to_str()
+                            .and_then(|s| s.parse::<i32>().ok())
+                            .ok_or(InvalidYearFilenameError)?;
+                        Ok((year, entry.path()))
+                    })
+                    .try_filter(|(year, _)| {
+                        future::ready(year >= &year_range.0 && year <= &year_range.1)
+                    })
+                    .and_then(async move |(year, path)| {
+                        deserialize_from_path(&path)
+                            .map_ok(|data| (year, data))
+                            .await
+                    })
+                    .try_collect()
+                    .await
             }
 
             let companies_fut = deserialize_from_path::<HashMap<String, usize>>(&company_file);
-            let yearly_fut = get_time_series_for!(&yearly_folder, Array2<f32>, yearly_years);
-            let daily_fut = get_time_series_for!(&daily_folder, Array3<f32>, daily_years);
+            let yearly_fut = get_time_series_for::<Array2<f32>>(&yearly_folder, yearly_years);
+            let daily_fut = get_time_series_for::<Array3<f32>>(&daily_folder, daily_years);
 
             let (companies, yearly, daily) =
                 future::try_join3(companies_fut, yearly_fut, daily_fut).await?;
@@ -330,10 +374,7 @@ pub mod fetcher {
 
         async fn to_storage_repr(&mut self) -> Result<StorageRepr, Self::StorageReprError>; // do not call this directly from outside
 
-        async fn load_financials(
-            &mut self,
-            options: &LoadOptions,
-        ) -> Result<Financials, anyhow::Error> {
+        async fn load_financials(&mut self, options: Options) -> Result<Financials, anyhow::Error> {
             Financials::from_repr(self.to_storage_repr().map_err(FetcherError).await?, options)
         }
 

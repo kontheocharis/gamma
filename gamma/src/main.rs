@@ -11,11 +11,14 @@ mod traits;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use ndarray::{Array2, Array3};
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use thiserror::Error;
 use tokio::prelude::*;
 
-use crate::financials::{Financials, LoadOptions, fetcher::{Fetcher, StorageRepr}};
+use crate::financials::{
+    fetcher::{Fetcher, StorageRepr},
+    Financials, Options,
+};
 use crate::traits::CountVariants;
 
 fn setup_logger() -> Result<(), fern::InitError> {
@@ -39,7 +42,7 @@ fn setup_logger() -> Result<(), fern::InitError> {
 struct MockFetcher;
 
 #[derive(Error, Debug)]
-#[error("Nonexistent error")]
+#[error("Mock error")]
 struct MockFetcherError;
 
 #[async_trait]
@@ -96,15 +99,28 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let fin = Financials::from_path(
         &args[1],
-        &LoadOptions {
+        Options {
             yearly_min: 2018,
             yearly_max: 2020,
             daily_min: NaiveDate::from_ymd(2018, 3, 14),
             daily_max: NaiveDate::from_ymd(2020, 12, 10),
         },
-    ).await?;
+    )
+    .await?;
 
     println!("{:#?}", fin);
+    println!(
+        "{:#?}",
+        (
+            fin.index_to_date(1002),
+            fin.date_to_index(NaiveDate::from_ymd(2018, 3, 15)),
+            fin.date_to_index(NaiveDate::from_ymd(2020, 12, 10)),
+            fin.year_to_index(2019),
+            fin.date_range(),
+            fin.year_range(),
+            fin.valid_year_index(2)
+        )
+    );
 
     // let financials = Financials::load("save_test")?;
     // // financials.save("save_test");
