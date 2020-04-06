@@ -24,4 +24,5 @@ zip = "0.5"
 async-trait = "0.1"
 thiserror = "1.0"
 anyhow = "1.0"
-phf = { version = "0.8", features = ["macros"] }
+itertools = "0.9"
+enum-iterator = "0.6"

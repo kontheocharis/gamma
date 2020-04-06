@@ -1,22 +1,16 @@
 use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::error::Error;
-use std::iter;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use async_trait::async_trait;
 use chrono::{Datelike, NaiveDate};
-use futures::prelude::*;
-use ndarray::{s, Array2, Array3, ArrayView3, Axis};
+use enum_iterator::IntoEnumIterator;
+use ndarray::{s, Array3, ArrayView3, Axis};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
-use tokio::fs;
-use tokio::io::AsyncWriteExt;
 
-use crate::traits::CountVariants;
+use crate::fetching::StorageRepr;
 
 #[repr(usize)]
-#[derive(CountVariants, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
+#[derive(PartialEq, IntoEnumIterator, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
 pub enum YearlyField {
     CashShortTermInvestments,
     Ppe,
@@ -31,7 +25,7 @@ pub enum YearlyField {
 }
 
 #[repr(usize)]
-#[derive(CountVariants, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
+#[derive(PartialEq, IntoEnumIterator, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
 pub enum DailyField {
     HighSharePrice,
     LowSharePrice,
@@ -116,10 +110,7 @@ where
         index < self.daily_data.len_of(Self::TIME_AXIS)
     }
 
-    pub fn from_repr(
-        repr: fetcher::StorageRepr,
-        options: Options,
-    ) -> Result<Financials, anyhow::Error> {
+    pub fn from_repr(repr: StorageRepr, options: Options) -> anyhow::Result<Financials> {
         options.ensure_ok()?;
         Self::from_repr_unchecked(repr, options)
     }
@@ -127,11 +118,11 @@ where
     pub async fn from_path<P: AsRef<Path>>(
         path: P,
         options: Options,
-    ) -> Result<Financials, anyhow::Error> {
+    ) -> anyhow::Result<Financials> {
         let path_ref = path.as_ref();
         options.ensure_ok()?;
 
-        let repr = fetcher::StorageRepr::load_from_path(
+        let repr = StorageRepr::load_from_path(
             path_ref,
             (options.yearly_min, options.yearly_max),
             (options.daily_min.year(), options.daily_max.year()),
@@ -141,16 +132,13 @@ where
         Self::from_repr_unchecked(repr, options)
     }
 
-    fn from_repr_unchecked(
-        repr: fetcher::StorageRepr,
-        options: Options,
-    ) -> Result<Financials, anyhow::Error> {
+    fn from_repr_unchecked(repr: StorageRepr, options: Options) -> anyhow::Result<Financials> {
         let no_of_companies = repr.companies.len();
 
         let mut yearly_data = Array3::from_elem(
             (
                 (options.yearly_max - options.yearly_min + 1) as usize,
-                YearlyField::COUNT,
+                YearlyField::VARIANT_COUNT,
                 no_of_companies,
             ),
             std::f32::NAN,
@@ -171,7 +159,7 @@ where
             (
                 (options.daily_max.num_days_from_ce() - options.daily_min.num_days_from_ce() + 1)
                     as usize,
-                DailyField::COUNT,
+                DailyField::VARIANT_COUNT,
                 no_of_companies,
             ),
             std::f32::NAN,
@@ -217,176 +205,5 @@ where
             yearly_data,
             daily_data,
         })
-    }
-}
-
-pub mod fetcher {
-    use super::*;
-
-    use anyhow::anyhow;
-    use futures::stream::{StreamExt, TryStreamExt};
-    use tokio::fs::{self, File};
-    use tokio::io::AsyncReadExt;
-
-    const NPY_SAVE_FILE: &str = "data.npy";
-    const HASHMAP_SAVE_FILE: &str = "companies.bin";
-
-    const YEARLY_FOLDER: &str = "yearly";
-    const DAILY_FOLDER: &str = "daily";
-    const COMPANY_FILE: &str = "companies";
-
-    #[derive(Debug)]
-    pub struct StorageRepr {
-        pub companies: HashMap<String, usize>,
-        pub yearly: HashMap<i32, Array2<f32>>,
-        pub daily: HashMap<i32, Array3<f32>>, // Axis(0): 0-365 or 0-364
-    }
-
-    #[derive(Error, Debug)]
-    #[error(
-        "Missing items: folders '{}' and '{}', and file '{}' need to exist in path",
-        YEARLY_FOLDER,
-        DAILY_FOLDER,
-        COMPANY_FILE
-    )]
-    pub struct MissingFoldersError;
-
-    #[derive(Error, Debug)]
-    #[error("Files in path subfolders must be in form 2018, 2019, 2020, etc.")]
-    pub struct InvalidYearFilenameError;
-
-    impl StorageRepr {
-        pub async fn load_from_path<P: AsRef<Path>>(
-            path: P,
-            yearly_years: (i32, i32),
-            daily_years: (i32, i32),
-        ) -> Result<StorageRepr, anyhow::Error> {
-            let path_ref = path.as_ref();
-
-            let (yearly_folder, daily_folder, company_file) = (
-                path_ref.join(YEARLY_FOLDER),
-                path_ref.join(DAILY_FOLDER),
-                path_ref.join(COMPANY_FILE),
-            );
-
-            if !yearly_folder.exists() || !daily_folder.exists() || !company_file.exists() {
-                return Err(MissingFoldersError)?;
-            }
-
-            async fn deserialize_from_path<T: serde::de::DeserializeOwned>(
-                path: &PathBuf,
-            ) -> Result<T, anyhow::Error> {
-                let mut file = File::open(path).await?;
-                let mut data = Vec::with_capacity(file.metadata().await?.len() as usize);
-                file.read_to_end(&mut data).await?;
-                Ok(bincode::deserialize(&data)?)
-            }
-
-            async fn get_time_series_for<T: serde::de::DeserializeOwned>(
-                folder: &PathBuf,
-                year_range: (i32, i32),
-            ) -> Result<HashMap<i32, T>, anyhow::Error> {
-                fs::read_dir(folder)
-                    .await?
-                    .map(|entry| {
-                        let entry = entry?;
-                        let year = entry
-                            .file_name()
-                            .to_str()
-                            .and_then(|s| s.parse::<i32>().ok())
-                            .ok_or(InvalidYearFilenameError)?;
-                        Ok((year, entry.path()))
-                    })
-                    .try_filter(|(year, _)| {
-                        future::ready(year >= &year_range.0 && year <= &year_range.1)
-                    })
-                    .and_then(async move |(year, path)| {
-                        deserialize_from_path(&path)
-                            .map_ok(|data| (year, data))
-                            .await
-                    })
-                    .try_collect()
-                    .await
-            }
-
-            let companies_fut = deserialize_from_path::<HashMap<String, usize>>(&company_file);
-            let yearly_fut = get_time_series_for::<Array2<f32>>(&yearly_folder, yearly_years);
-            let daily_fut = get_time_series_for::<Array3<f32>>(&daily_folder, daily_years);
-
-            let (companies, yearly, daily) =
-                future::try_join3(companies_fut, yearly_fut, daily_fut).await?;
-
-            Ok(StorageRepr {
-                companies,
-                yearly,
-                daily,
-            })
-        }
-
-        pub async fn save_to_path<P: AsRef<Path>>(&self, path: P) -> Result<(), anyhow::Error> {
-            let path_ref = path.as_ref();
-
-            // Create paths needed
-            future::try_join(
-                fs::create_dir_all(path_ref.join(YEARLY_FOLDER)),
-                fs::create_dir_all(path_ref.join(DAILY_FOLDER)),
-            )
-            .await?;
-
-            let path_for = |year: i32, prefix: &str| path_ref.join(prefix).join(year.to_string());
-
-            macro_rules! files_for {
-                ($prop:ident, $folder:expr) => {
-                    self.$prop
-                        .iter()
-                        .map(|(&year, array)| (path_for(year, $folder), bincode::serialize(array)))
-                };
-            }
-
-            let yearly_files = files_for!(yearly, YEARLY_FOLDER);
-            let daily_files = files_for!(daily, DAILY_FOLDER);
-
-            let company_file = iter::once((
-                path_ref.join(COMPANY_FILE),
-                bincode::serialize(&self.companies),
-            ));
-
-            future::try_join_all(yearly_files.chain(daily_files).chain(company_file).map(
-                |(path, data)| {
-                    fs::File::create(path)
-                        .map_err(anyhow::Error::new)
-                        .and_then(async move |mut file| Ok(file.write_all(data?.as_ref()).await?))
-                },
-            ))
-            .await?;
-
-            Ok(())
-        }
-    }
-
-    #[derive(Error, Debug)]
-    #[error("Fetcher error: {0}")]
-    pub struct FetcherError<T: Error>(T);
-
-    #[async_trait]
-    pub trait Fetcher {
-        type StorageReprError: Error + Send + Sync + 'static;
-
-        async fn to_storage_repr(&mut self) -> Result<StorageRepr, Self::StorageReprError>; // do not call this directly from outside
-
-        async fn load_financials(&mut self, options: Options) -> Result<Financials, anyhow::Error> {
-            Financials::from_repr(self.to_storage_repr().map_err(FetcherError).await?, options)
-        }
-
-        async fn save_repr_to_path<P: AsRef<Path> + Send>(
-            &mut self,
-            path: P,
-        ) -> Result<(), anyhow::Error> {
-            self.to_storage_repr()
-                .await
-                .map_err(FetcherError)?
-                .save_to_path(path)
-                .await
-        }
     }
 }
