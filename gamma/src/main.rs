@@ -20,7 +20,7 @@ use ndarray::{Array2, Array3};
 use thiserror::Error;
 
 use crate::fetching::{Fetch, StorageRepr};
-use crate::financials::{Financials, Options};
+use crate::financials::{Financials, Options, YearlyField};
 
 fn setup_logger() -> Result<(), fern::InitError> {
     fern::Dispatch::new()
@@ -117,9 +117,25 @@ async fn main() -> anyhow::Result<()> {
         Err(anyhow::anyhow!("Need path argument!"))?
     }
 
-    let mut fetcher = simfin::Fetcher::from_local(&args[1]).await?;
-    let repr = fetcher.to_storage_repr().await?;
-    println!("{:?}", repr);
+    let financials = Financials::from_repr(
+        simfin::Fetcher::from_local(&args[1]).await?.to_storage_repr().await?,
+        Options {
+            yearly_min: 2016,
+            yearly_max: 2018,
+            daily_min: NaiveDate::from_ymd(2016, 1, 1),
+            daily_max: NaiveDate::from_ymd(2018, 1, 1),
+        },
+    )?;
+    // println!("{:?}", financials);
+
+    println!(
+        "{:#?}",
+        financials.yearly().get((
+            financials.year_to_index(2016),
+            YearlyField::CashShortTermInvestments as usize,
+            financials.company_to_index("AAON")
+        )).unwrap()
+    );
 
     // let _fetcher = MockFetcher;
     // let repr = fetcher.to_storage_repr().await?;
@@ -136,19 +152,6 @@ async fn main() -> anyhow::Result<()> {
     //     },
     // )
     // .await?;
-
-    // println!(
-    //     "{:#?}",
-    //     (
-    //         fin.index_to_date(1002),
-    //         fin.date_to_index(NaiveDate::from_ymd(2018, 3, 15)),
-    //         fin.date_to_index(NaiveDate::from_ymd(2020, 12, 10)),
-    //         fin.year_to_index(2019),
-    //         fin.date_range(),
-    //         fin.year_range(),
-    //         fin.valid_year_index(2)
-    //     )
-    // );
 
     // let financials = Financials::load("save_test")?;
     // // financials.save("save_test");

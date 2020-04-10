@@ -94,6 +94,14 @@ where
         (date.num_days_from_ce() - self.options.daily_min.num_days_from_ce()) as usize
     }
 
+    pub fn company_to_index(&self, company: &str) -> usize {
+        *self.companies.get(company).unwrap()
+    }
+
+    pub fn index_to_company(&self, index: usize) -> &str {
+        self.companies.iter().find_map(|(k, &v)| if v == index { Some(k.as_ref()) } else { None }).unwrap()
+    }
+
     pub fn year_range(&self) -> (i32, i32) {
         (self.options.yearly_min, self.options.yearly_max)
     }

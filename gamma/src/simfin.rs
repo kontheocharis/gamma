@@ -9,7 +9,7 @@ use chrono::{Datelike, NaiveDate};
 use enum_iterator::IntoEnumIterator;
 use futures::prelude::*;
 use itertools::izip;
-use ndarray::{s, Array2, Array3, ArrayViewMut1};
+use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayViewMut1};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 use tokio::fs::File;
@@ -28,6 +28,9 @@ const COMPANIES_FILENAME: &str = "us-companies.csv";
 
 const READ_CAPACITY: usize = 1 << 15;
 const CSV_SEP: char = ';';
+
+const MIN_DAYS_AFTER_REPORT_SHARE_PRICE: usize = 1;
+const MAX_DAYS_AFTER_REPORT_SHARE_PRICE: usize = 10;
 
 pub trait FetcherRead = AsyncBufRead + Sync + Send + Unpin;
 
@@ -208,7 +211,11 @@ impl<R: FetcherRead> Fetcher<R> {
 trait Fields: Into<usize> + TryFrom<usize> + IntoEnumIterator + Eq + Hash {}
 
 trait YearlyFields: Fields {
-    fn to_yearly(self_data: &HashMap<Self, f32>, out: ArrayViewMut1<'_, f32>) -> Option<()>;
+    fn to_yearly(
+        self_data: &HashMap<Self, f32>,
+        stock_data_after: ArrayView1<'_, f32>,
+        out: ArrayViewMut1<'_, f32>,
+    ) -> Option<()>;
 }
 
 trait DailyFields: Fields {
@@ -231,7 +238,11 @@ enum BalanceSheetFields {
 impl Fields for BalanceSheetFields {}
 
 impl YearlyFields for BalanceSheetFields {
-    fn to_yearly(self_data: &HashMap<Self, f32>, mut out: ArrayViewMut1<'_, f32>) -> Option<()> {
+    fn to_yearly(
+        self_data: &HashMap<Self, f32>,
+        stock_data_after: ArrayView1<'_, f32>,
+        mut out: ArrayViewMut1<'_, f32>,
+    ) -> Option<()> {
         out[YearlyField::CashShortTermInvestments as usize] = *self_data.get(&Self::CashCashEq)?;
         out[YearlyField::Ppe as usize] = *self_data.get(&Self::Ppe)?;
         out[YearlyField::TotalLiabilities as usize] = *self_data.get(&Self::TotalLiabilities)?;
@@ -239,6 +250,14 @@ impl YearlyFields for BalanceSheetFields {
         out[YearlyField::TotalDebt as usize] =
             *self_data.get(&Self::ShortTermDebt)? + *self_data.get(&Self::LongTermDebt)?;
         out[YearlyField::TotalShareholdersEquity as usize] = *self_data.get(&Self::TotalEquity)?;
+
+        out[YearlyField::SharePriceAtReport as usize] = *stock_data_after
+            .iter()
+            .enumerate()
+            .skip(MIN_DAYS_AFTER_REPORT_SHARE_PRICE)
+            .find(|(i, price)| !price.is_nan() && *i <= MAX_DAYS_AFTER_REPORT_SHARE_PRICE)
+            .map(|(i, price)| price)
+            .unwrap_or(&f32::NAN);
 
         Some(())
     }
@@ -254,7 +273,11 @@ enum IncomeStatementFields {
 impl Fields for IncomeStatementFields {}
 
 impl YearlyFields for IncomeStatementFields {
-    fn to_yearly(self_data: &HashMap<Self, f32>, mut out: ArrayViewMut1<'_, f32>) -> Option<()> {
+    fn to_yearly(
+        self_data: &HashMap<Self, f32>,
+        _: ArrayView1<'_, f32>,
+        mut out: ArrayViewMut1<'_, f32>,
+    ) -> Option<()> {
         // TODO: what to do here?
         Some(())
     }
@@ -270,7 +293,11 @@ enum CashFlowFields {
 impl Fields for CashFlowFields {}
 
 impl YearlyFields for CashFlowFields {
-    fn to_yearly(self_data: &HashMap<Self, f32>, mut out: ArrayViewMut1<'_, f32>) -> Option<()> {
+    fn to_yearly(
+        self_data: &HashMap<Self, f32>,
+        _: ArrayView1<'_, f32>,
+        mut out: ArrayViewMut1<'_, f32>,
+    ) -> Option<()> {
         out[YearlyField::CashFlow as usize] = *self_data.get(&Self::NetCash)?;
 
         Some(())
@@ -348,53 +375,6 @@ impl<R: FetcherRead> Fetch for Fetcher<R> {
         let mut yearly_map: HashMap<i32, Array2<f32>> = HashMap::new();
         let mut daily_map: HashMap<i32, Array3<f32>> = HashMap::new();
 
-        async fn run_for_yearly<F: YearlyFields>(
-            stream: impl TryStream<Ok = ParseResult<F>, Error = anyhow::Error>,
-            map: &mut HashMap<i32, Array2<f32>>,
-            companies: &HashMap<String, usize>,
-            sheet_name: &str,
-        ) -> anyhow::Result<()> {
-            stream
-                .try_for_each(|parse_result| {
-                    let mut array = map.entry(parse_result.classifying_year).or_insert_with(|| {
-                        Array2::from_elem((YearlyField::VARIANT_COUNT, companies.len()), f32::NAN)
-                    });
-
-                    future::ready(
-                        F::to_yearly(
-                            &parse_result.data,
-                            array.slice_mut(s![.., parse_result.company_index]),
-                        )
-                        .ok_or(
-                            FileParsingError(
-                                sheet_name.to_string(),
-                                "error while mapping to StorageRepr".to_string(),
-                            )
-                            .into(),
-                        ),
-                    )
-                })
-                .await
-        }
-
-        run_for_yearly(
-            bs_stream,
-            &mut yearly_map,
-            &companies,
-            BALANCE_SHEET_FILENAME,
-        )
-        .await?;
-        run_for_yearly(cf_stream, &mut yearly_map, &companies, CASH_FLOW_FILENAME).await?;
-        run_for_yearly(
-            is_stream,
-            &mut yearly_map,
-            &companies,
-            INCOME_STATEMENT_FILENAME,
-        )
-        .await?;
-
-        // TODO: share_price_for_date
-        // TODO: debug and verify
         sp_stream
             .try_for_each(|parse_result| {
                 let mut array = daily_map
@@ -411,25 +391,90 @@ impl<R: FetcherRead> Fetch for Fetcher<R> {
                         )
                     });
 
-                future::ready(
-                    SharePriceFields::to_daily(
-                        &parse_result.data,
-                        array.slice_mut(s![
-                            parse_result.entry_date.ordinal0() as usize,
-                            ..,
-                            parse_result.company_index
-                        ]),
-                    )
-                    .ok_or(
-                        FileParsingError(
-                            SHARE_PRICES_FILENAME.to_string(),
-                            "error while mapping to StorageRepr".to_string(),
-                        )
-                        .into(),
-                    ),
+                future::ready(Ok(SharePriceFields::to_daily(
+                    &parse_result.data,
+                    array.slice_mut(s![
+                        parse_result.entry_date.ordinal0() as usize,
+                        ..,
+                        parse_result.company_index
+                    ]),
                 )
+                .expect("something went wrong while mapping to StorageRepr")))
             })
             .await?;
+
+        async fn run_for_yearly<F: YearlyFields>(
+            stream: impl TryStream<Ok = ParseResult<F>, Error = anyhow::Error>,
+            yearly_map: &mut HashMap<i32, Array2<f32>>,
+            daily_map: &HashMap<i32, Array3<f32>>,
+            companies: &HashMap<String, usize>,
+            sheet_name: &str,
+        ) -> anyhow::Result<()> {
+            stream
+                .try_for_each(|parse_result| {
+                    let mut yearly_array = yearly_map
+                        .entry(parse_result.classifying_year)
+                        .or_insert_with(|| {
+                            Array2::from_elem(
+                                (YearlyField::VARIANT_COUNT, companies.len()),
+                                f32::NAN,
+                            )
+                        });
+
+                    future::ready(
+                        F::to_yearly(
+                            &parse_result.data,
+                            daily_map
+                                .get(&parse_result.classifying_year)
+                                .expect(&format!(
+                                    "no daily data for year {}!",
+                                    parse_result.classifying_year
+                                ))
+                                .slice(s![
+                                    parse_result.entry_date.ordinal0() as usize..,
+                                    DailyField::HighSharePrice as usize,
+                                    parse_result.company_index
+                                ]),
+                            yearly_array.slice_mut(s![.., parse_result.company_index]),
+                        )
+                        .ok_or(
+                            FileParsingError(
+                                sheet_name.to_string(),
+                                "error while mapping to StorageRepr".to_string(),
+                            )
+                            .into(),
+                        ),
+                    )
+                })
+                .await
+        };
+
+        // We could do this concurrently with a ConcurrentHashMap, but who cares? It's already so
+        // fast.
+        run_for_yearly(
+            bs_stream,
+            &mut yearly_map,
+            &daily_map,
+            &companies,
+            BALANCE_SHEET_FILENAME,
+        )
+        .await?;
+        run_for_yearly(
+            cf_stream,
+            &mut yearly_map,
+            &daily_map,
+            &companies,
+            CASH_FLOW_FILENAME,
+        )
+        .await?;
+        run_for_yearly(
+            is_stream,
+            &mut yearly_map,
+            &daily_map,
+            &companies,
+            INCOME_STATEMENT_FILENAME,
+        )
+        .await?;
 
         Ok(StorageRepr {
             companies,
