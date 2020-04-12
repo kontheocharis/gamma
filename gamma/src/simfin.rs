@@ -204,17 +204,16 @@ impl<R: FetcherRead> Fetcher<R> {
             .lines()
             .enumerate()
             .map(|(i, line)| {
-                Ok((
-                    line?
-                        .split(CSV_SEP)
-                        .nth(0)
-                        .ok_or(FileParsingError(
-                            sheet_name.to_string(),
-                            "company column not found".to_string(),
-                        ))?
-                        .to_string(),
-                    i,
-                ))
+                let result = line?
+                    .split(CSV_SEP)
+                    .nth(0)
+                    .ok_or(FileParsingError(
+                        sheet_name.to_string(),
+                        "company column not found".to_string(),
+                    ))?
+                    .to_string();
+
+                Ok((result, i))
             })
             .try_collect()
             .await

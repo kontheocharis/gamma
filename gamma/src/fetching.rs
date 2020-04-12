@@ -158,7 +158,7 @@ pub struct FetchError<T: Display + Debug>(T);
 pub trait Fetch {
     type StorageReprError: Display + Debug + Send + Sync + 'static;
 
-    async fn to_storage_repr(&mut self) -> Result<StorageRepr, Self::StorageReprError>; // do not call this directly from outside
+    async fn to_storage_repr(&mut self) -> Result<StorageRepr, Self::StorageReprError>;
 
     async fn load_financials(&mut self, options: FinancialsOptions) -> anyhow::Result<Financials> {
         Financials::from_repr(self.to_storage_repr().map_err(FetchError).await?, options)
