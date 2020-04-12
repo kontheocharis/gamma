@@ -9,18 +9,21 @@ mod util;
 
 mod fetching;
 mod financials;
+mod metrics;
 mod simfin;
 
 use std::collections::HashMap;
+use std::path;
 
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use enum_iterator::IntoEnumIterator;
-use ndarray::{Array2, Array3};
+use ndarray::{Array2, Array3, s};
 use thiserror::Error;
 
 use crate::fetching::{Fetch, StorageRepr};
-use crate::financials::{Financials, Options, YearlyField};
+use crate::financials::{Companies, Financials, Options, YearlyField};
+use crate::metrics::v1;
 
 fn setup_logger() -> Result<(), fern::InitError> {
     fern::Dispatch::new()
@@ -52,7 +55,7 @@ impl Fetch for MockFetcher {
 
     async fn to_storage_repr(&mut self) -> Result<StorageRepr, Self::StorageReprError> {
         let mut repr = StorageRepr {
-            companies: HashMap::new(),
+            companies: Companies::new(),
             yearly: HashMap::new(),
             daily: HashMap::new(),
         };
@@ -108,34 +111,63 @@ impl Fetch for MockFetcher {
     }
 }
 
+async fn save_simfin(dir: &str, options: Options) -> anyhow::Result<Financials> {
+    let repr = simfin::Fetcher::from_local(dir)
+        .await?
+        .to_storage_repr()
+        .await?;
+
+    repr.save_to_path(&format!("{}_repr", dir)).await?;
+
+    Ok(Financials::from_repr(repr, options)?)
+}
+
+async fn cached_simfin(dir: &str, options: Options) -> anyhow::Result<Financials> {
+    Ok(Financials::from_path(&format!("{}_repr", dir), options).await?)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     setup_logger()?;
 
-    if args.len() != 2 {
-        Err(anyhow::anyhow!("Need path argument!"))?
+    if args.len() != 3 {
+        Err(anyhow::anyhow!("Usage: (reparse|cached) <dir>"))?
     }
 
-    let financials = Financials::from_repr(
-        simfin::Fetcher::from_local(&args[1]).await?.to_storage_repr().await?,
-        Options {
-            yearly_min: 2016,
-            yearly_max: 2018,
-            daily_min: NaiveDate::from_ymd(2016, 1, 1),
-            daily_max: NaiveDate::from_ymd(2018, 1, 1),
+    let options = Options {
+        yearly_min: 2016,
+        yearly_max: 2018,
+        daily_min: NaiveDate::from_ymd(2016, 1, 1),
+        daily_max: NaiveDate::from_ymd(2018, 1, 1),
+    };
+
+    let financials = match args[1].as_ref() {
+        "reparse" => save_simfin(&args[2], options).await?,
+        "cached" => cached_simfin(&args[2], options).await?,
+        _ => panic!("Unexpected argument")
+    };
+
+    let metrics = v1::Metrics::calculate(
+        &financials,
+        v1::Options {
+            year: 2018,
+            cash_flows_back: 2,
         },
     )?;
-    // println!("{:?}", financials);
 
-    println!(
-        "{:#?}",
-        financials.yearly().get((
-            financials.year_to_index(2016),
-            YearlyField::CashShortTermInvestments as usize,
-            financials.company_to_index("AAON")
-        )).unwrap()
-    );
+    println!("{}", metrics.evaluate());
+
+    // OLD:
+
+    // println!(
+    //     "{:#?}",
+    //     financials.yearly().get((
+    //         financials.year_to_index(2016),
+    //         YearlyField::CashShortTermInvestments as usize,
+    //         financials.company_to_index("AAON")
+    //     )).unwrap()
+    // );
 
     // let _fetcher = MockFetcher;
     // let repr = fetcher.to_storage_repr().await?;

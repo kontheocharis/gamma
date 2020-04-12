@@ -54,12 +54,18 @@ impl Options {
     }
 }
 
+pub type Companies = HashMap<String, usize>;
+pub type YearlyData = Array3<f32>;
+pub type DailyData = Array3<f32>;
+pub type YearlyView<'a> = ArrayView3<'a, f32>;
+pub type DailyView<'a> = ArrayView3<'a, f32>;
+
 #[derive(Debug)]
 pub struct Financials {
-    companies: HashMap<String, usize>,
+    companies: Companies,
     options: Options,
-    yearly_data: Array3<f32>, // Axis(0): year, Axis(1): x::Field, Axis(2): company
-    daily_data: Array3<f32>,  // Axis(0): day, Axis(1): x::Field, Axis(2): company
+    yearly_data: YearlyData, // Axis(0): year, Axis(1): x::Field, Axis(2): company
+    daily_data: DailyData,  // Axis(0): day, Axis(1): x::Field, Axis(2): company
 }
 
 impl<'a> Financials
@@ -70,12 +76,16 @@ where
     pub const FIELD_AXIS: Axis = Axis(1);
     pub const COMPANY_AXIS: Axis = Axis(2);
 
-    pub fn yearly(&'a self) -> ArrayView3<'a, f32> {
+    pub fn yearly(&'a self) -> YearlyView<'a> {
         self.yearly_data.view()
     }
 
-    pub fn daily(&'a self) -> ArrayView3<'a, f32> {
+    pub fn daily(&'a self) -> DailyView<'a> {
         self.daily_data.view()
+    }
+
+    pub fn companies(&'a self) -> &'a Companies {
+        &self.companies
     }
 
     pub fn index_to_year(&self, index: usize) -> i32 {
@@ -146,7 +156,7 @@ where
     fn from_repr_unchecked(repr: StorageRepr, options: Options) -> anyhow::Result<Financials> {
         let no_of_companies = repr.companies.len();
 
-        let mut yearly_data = Array3::from_elem(
+        let mut yearly_data = YearlyData::from_elem(
             (
                 (options.yearly_max - options.yearly_min + 1) as usize,
                 YearlyField::VARIANT_COUNT,
@@ -166,7 +176,7 @@ where
                 .assign(&data);
         }
 
-        let mut daily_data = Array3::from_elem(
+        let mut daily_data = DailyData::from_elem(
             (
                 (options.daily_max.num_days_from_ce() - options.daily_min.num_days_from_ce() + 1)
                     as usize,

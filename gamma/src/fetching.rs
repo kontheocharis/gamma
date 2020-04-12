@@ -12,7 +12,7 @@ use tokio::fs::{self, File};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::try_join;
 
-use crate::financials::{Financials, Options as FinancialsOptions};
+use crate::financials::{Financials, Options as FinancialsOptions, Companies};
 
 const NPY_SAVE_FILE: &str = "data.npy";
 const HASHMAP_SAVE_FILE: &str = "companies.bin";
@@ -23,7 +23,7 @@ const COMPANY_FILE: &str = "companies";
 
 #[derive(Debug)]
 pub struct StorageRepr {
-    pub companies: HashMap<String, usize>,
+    pub companies: Companies,
     pub yearly: HashMap<i32, Array2<f32>>, // Axis(0): Columns, Axis(1): Companies
     pub daily: HashMap<i32, Array3<f32>>, // Axis(0): 0-365 or 0-364, Axis(1): Columns, Axis(2): Companies
 }
@@ -95,7 +95,7 @@ impl StorageRepr {
                 .await
         }
 
-        let companies_fut = deserialize_from_path::<HashMap<String, usize>>(&company_file);
+        let companies_fut = deserialize_from_path::<Companies>(&company_file);
         let yearly_fut = get_time_series_for::<Array2<f32>>(&yearly_folder, yearly_years);
         let daily_fut = get_time_series_for::<Array3<f32>>(&daily_folder, daily_years);
 

@@ -17,7 +17,7 @@ use tokio::io::{self, AsyncBufRead, AsyncBufReadExt, BufReader};
 use tokio::try_join;
 
 use crate::fetching::{Fetch, StorageRepr};
-use crate::financials::{DailyField, YearlyField};
+use crate::financials::{Companies, DailyField, YearlyField};
 use crate::util::IndexEnum;
 
 const BALANCE_SHEET_FILENAME: &str = "us-balance-annual.csv";
@@ -43,9 +43,100 @@ pub struct Fetcher<R: FetcherRead> {
     companies: R,
 }
 
+#[async_trait]
+impl<R: FetcherRead> Fetch for Fetcher<R> {
+    type StorageReprError = anyhow::Error;
+
+    async fn to_storage_repr(&mut self) -> anyhow::Result<StorageRepr> {
+        let companies = Fetcher::parse_company_csv(&mut self.companies, COMPANIES_FILENAME).await?;
+
+        let bs_opts = ParseOptions {
+            sheet_name: BALANCE_SHEET_FILENAME,
+            columns: HashSet::from_iter(BalanceSheetFields::into_enum_iter()),
+            companies: &companies,
+            entry_date_column: 6,       // "Publish Date"
+            classifying_year_column: 3, // "Fiscal Year"
+            classifying_year_column_is_date: false,
+        };
+
+        let bs_stream = Fetcher::parse_sheet_csv(&mut self.balance_sheet, &bs_opts);
+
+        let cf_opts = ParseOptions {
+            sheet_name: CASH_FLOW_FILENAME,
+            columns: HashSet::from_iter(CashFlowFields::into_enum_iter()),
+            companies: &companies,
+            entry_date_column: 6,       // "Publish Date"
+            classifying_year_column: 3, // "Fiscal Year"
+            classifying_year_column_is_date: false,
+        };
+
+        let cf_stream = Fetcher::parse_sheet_csv(&mut self.cash_flow, &cf_opts);
+
+        let is_opts = ParseOptions {
+            sheet_name: INCOME_STATEMENT_FILENAME,
+            columns: HashSet::from_iter(IncomeStatementFields::into_enum_iter()),
+            companies: &companies,
+            entry_date_column: 6,       // "Publish Date"
+            classifying_year_column: 3, // "Fiscal Year"
+            classifying_year_column_is_date: false,
+        };
+
+        let is_stream = Fetcher::parse_sheet_csv(&mut self.income_statement, &is_opts);
+
+        let sp_opts = ParseOptions {
+            sheet_name: SHARE_PRICES_FILENAME,
+            columns: HashSet::from_iter(SharePriceFields::into_enum_iter()),
+            companies: &companies,
+            entry_date_column: 2,       // "Publish Date"
+            classifying_year_column: 2, // "Fiscal Year"
+            classifying_year_column_is_date: true,
+        };
+
+        let sp_stream = Fetcher::parse_sheet_csv(&mut self.share_prices, &sp_opts);
+
+        let mut yearly_map: HashMap<i32, Array2<f32>> = HashMap::new();
+        let mut daily_map: HashMap<i32, Array3<f32>> = HashMap::new();
+
+        // We could do this concurrently with a ConcurrentHashMap, but who cares? It's already so
+        // fast.
+        run_for_daily(sp_stream, &mut daily_map, &companies, SHARE_PRICES_FILENAME).await?;
+
+        run_for_yearly(
+            bs_stream,
+            &mut yearly_map,
+            &daily_map,
+            &companies,
+            BALANCE_SHEET_FILENAME,
+        )
+        .await?;
+        run_for_yearly(
+            cf_stream,
+            &mut yearly_map,
+            &daily_map,
+            &companies,
+            CASH_FLOW_FILENAME,
+        )
+        .await?;
+        run_for_yearly(
+            is_stream,
+            &mut yearly_map,
+            &daily_map,
+            &companies,
+            INCOME_STATEMENT_FILENAME,
+        )
+        .await?;
+
+        Ok(StorageRepr {
+            companies,
+            yearly: yearly_map,
+            daily: daily_map,
+        })
+    }
+}
+
 #[derive(Error, Debug)]
 #[error("File not found: {0}")]
-struct FileNotFoundError(PathBuf);
+pub struct FileNotFoundError(PathBuf);
 
 impl Fetcher<BufReader<File>> {
     pub async fn from_local(path: impl AsRef<Path>) -> anyhow::Result<Self> {
@@ -82,13 +173,15 @@ impl Fetcher<BufReader<File>> {
 
 #[derive(Error, Debug)]
 #[error("Simfin file parsing error in {0}: {1}")]
-struct FileParsingError(String, String);
+pub struct FileParsingError(String, String);
+
+// Private
 
 #[derive(Debug)]
 struct ParseOptions<'a, F: Fields> {
     sheet_name: &'a str,
     columns: HashSet<F>, // returned columns will be ordered in the way they appear
-    companies: &'a HashMap<String, usize>,
+    companies: &'a Companies,
     entry_date_column: usize,
     classifying_year_column: usize,
     classifying_year_column_is_date: bool,
@@ -106,7 +199,7 @@ impl<R: FetcherRead> Fetcher<R> {
     async fn parse_company_csv(
         company_sheet: &mut R,
         sheet_name: &str,
-    ) -> anyhow::Result<HashMap<String, usize>> {
+    ) -> anyhow::Result<Companies> {
         company_sheet
             .lines()
             .enumerate()
@@ -145,11 +238,7 @@ impl<R: FetcherRead> Fetcher<R> {
                         if let Some(&index) = options.companies.get(element) {
                             company_index = Some(index);
                         } else {
-                            log::info!(
-                                "skipping company {} in {} not present in company map",
-                                element,
-                                options.sheet_name,
-                            );
+                            // Skip if not present
                             return Ok(None);
                         }
                     }
@@ -210,6 +299,92 @@ impl<R: FetcherRead> Fetcher<R> {
     }
 }
 
+async fn run_for_yearly<F: YearlyFields>(
+    stream: impl Stream<Item = anyhow::Result<ParseResult<F>>>,
+    yearly_map: &mut HashMap<i32, Array2<f32>>,
+    daily_map: &HashMap<i32, Array3<f32>>,
+    companies: &Companies,
+    sheet_name: &str,
+) -> anyhow::Result<()> {
+    stream
+        .try_for_each(|parse_result| {
+            let mut yearly_array = yearly_map
+                .entry(parse_result.classifying_year)
+                .or_insert_with(|| {
+                    Array2::from_elem((YearlyField::VARIANT_COUNT, companies.len()), f32::NAN)
+                });
+
+            let result = F::to_yearly(
+                &parse_result.data,
+                daily_map
+                    .get(&parse_result.classifying_year)
+                    .expect(&format!(
+                        "no daily data for year {}!",
+                        parse_result.classifying_year
+                    ))
+                    .slice(s![
+                        parse_result.entry_date.ordinal0() as usize..,
+                        DailyField::HighSharePrice as usize,
+                        parse_result.company_index
+                    ]),
+                yearly_array.slice_mut(s![.., parse_result.company_index]),
+            )
+            .ok_or(
+                FileParsingError(
+                    sheet_name.to_string(),
+                    "error while mapping to StorageRepr".to_string(),
+                )
+                .into(),
+            );
+
+            future::ready(result)
+        })
+        .await
+}
+
+async fn run_for_daily<F: DailyFields>(
+    stream: impl Stream<Item = anyhow::Result<ParseResult<F>>>,
+    daily_map: &mut HashMap<i32, Array3<f32>>,
+    companies: &Companies,
+    sheet_name: &str,
+) -> anyhow::Result<()> {
+    stream
+        .try_for_each(|parse_result| {
+            let mut array = daily_map
+                .entry(parse_result.classifying_year)
+                .or_insert_with(|| {
+                    Array3::from_elem(
+                        (
+                            NaiveDate::from_ymd(parse_result.classifying_year, 12, 31).ordinal()
+                                as usize,
+                            DailyField::VARIANT_COUNT,
+                            companies.len(),
+                        ),
+                        f32::NAN,
+                    )
+                });
+
+            let result = F::to_daily(
+                &parse_result.data,
+                array.slice_mut(s![
+                    parse_result.entry_date.ordinal0() as usize,
+                    ..,
+                    parse_result.company_index
+                ]),
+            )
+            .ok_or(
+                FileParsingError(
+                    sheet_name.to_string(),
+                    "error while mapping to StorageRepr".to_string(),
+                )
+                .into(),
+            );
+
+            future::ready(result)
+        })
+        .await
+}
+
 trait Fields: IndexEnum + Hash {}
 
 trait YearlyFields: Fields {
@@ -224,273 +399,146 @@ trait DailyFields: Fields {
     fn to_daily(self_data: &HashMap<Self, f32>, out: ArrayViewMut1<'_, f32>) -> Option<()>;
 }
 
-#[repr(usize)]
-#[derive(
-    PartialEq, Eq, Hash, IntoEnumIterator, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone,
-)]
-enum BalanceSheetFields {
-    CashCashEq = 9,
-    Ppe = 13,
-    TotalAssets = 17,
-    ShortTermDebt = 19,
-    LongTermDebt = 21,
-    TotalLiabilities = 23,
-    TotalEquity = 27,
+macro_rules! impl_yearly {
+    ($($t:ty => $body:expr)*) => {
+        $(
+            impl YearlyFields for $t {
+                fn to_yearly(
+                    self_data: &HashMap<Self, f32>,
+                    stock_data_after: ArrayView1<'_, f32>,
+                    mut out: ArrayViewMut1<'_, f32>,
+                ) -> Option<()> {
+                    macro_rules! yearly_financial {
+                        ($field: ident) => {
+                            out[YearlyField::$field as usize]
+                        };
+                    }
+
+                    macro_rules! data {
+                        ($field: ident) => {
+                            *self_data.get(&Self::$field)?
+                        };
+                    }
+
+                    // ew macro hygiene sucks sometimes...
+                    macro_rules! stock_data_after {
+                        () => {
+                            stock_data_after
+                        };
+                    }
+
+                    Some($body)
+                }
+            }
+        )*
+    }
 }
-impl Fields for BalanceSheetFields {}
 
-impl YearlyFields for BalanceSheetFields {
-    fn to_yearly(
-        self_data: &HashMap<Self, f32>,
-        stock_data_after: ArrayView1<'_, f32>,
-        mut out: ArrayViewMut1<'_, f32>,
-    ) -> Option<()> {
-        out[YearlyField::CashShortTermInvestments as usize] = *self_data.get(&Self::CashCashEq)?;
-        out[YearlyField::Ppe as usize] = *self_data.get(&Self::Ppe)?;
-        out[YearlyField::TotalLiabilities as usize] = *self_data.get(&Self::TotalLiabilities)?;
-        out[YearlyField::TotalAssets as usize] = *self_data.get(&Self::TotalAssets)?;
-        out[YearlyField::TotalDebt as usize] =
-            *self_data.get(&Self::ShortTermDebt)? + *self_data.get(&Self::LongTermDebt)?;
-        out[YearlyField::TotalShareholdersEquity as usize] = *self_data.get(&Self::TotalEquity)?;
+macro_rules! impl_daily {
+    ($($t:ty => $body:expr)*) => {
+        $(
+            impl DailyFields for $t {
+                fn to_daily(self_data: &HashMap<Self, f32>, mut out: ArrayViewMut1<'_, f32>) -> Option<()> {
+                    macro_rules! daily_financial {
+                        ($field: ident) => {
+                            out[DailyField::$field as usize]
+                        };
+                    }
 
-        out[YearlyField::SharePriceAtReport as usize] = *stock_data_after
+                    macro_rules! data {
+                        ($field: ident) => {
+                            *self_data.get(&Self::$field)?
+                        };
+                    }
+
+                    Some($body)
+                }
+            }
+        )*
+    }
+}
+
+macro_rules! derive_fields {
+    ($(enum $t:ident $body:tt)*) => {
+        $(
+            #[repr(usize)]
+            #[derive(
+                PartialEq,
+                Eq,
+                Hash,
+                IntoEnumIterator,
+                Debug,
+                IntoPrimitive,
+                TryFromPrimitive,
+                Copy,
+                Clone,
+            )]
+            enum $t $body
+            impl Fields for $t {}
+        )*
+    };
+}
+
+derive_fields! {
+    enum BalanceSheetFields {
+        CashCashEq = 9,
+        Ppe = 13,
+        TotalAssets = 17,
+        ShortTermDebt = 19,
+        LongTermDebt = 21,
+        TotalLiabilities = 23,
+        TotalEquity = 27,
+    }
+
+    enum IncomeStatementFields {
+        Shares = 8,
+        NetIncome = 25,
+    }
+
+    enum CashFlowFields {
+        NetCash = 17,
+    }
+
+    enum SharePriceFields {
+        High = 5,
+    }
+}
+
+impl_yearly! {
+    BalanceSheetFields => {
+        yearly_financial!(CashShortTermInvestments) = data!(CashCashEq);
+
+        yearly_financial!(Ppe) = data!(Ppe);
+
+        yearly_financial!(TotalLiabilities) = data!(TotalLiabilities);
+
+        yearly_financial!(TotalAssets) = data!(TotalAssets);
+
+        yearly_financial!(TotalDebt) = data!(ShortTermDebt) + data!(LongTermDebt);
+
+        yearly_financial!(TotalShareholdersEquity) = data!(TotalEquity);
+
+        yearly_financial!(SharePriceAtReport) = *stock_data_after!()
             .iter()
             .enumerate()
             .skip(MIN_DAYS_AFTER_REPORT_SHARE_PRICE)
             .find(|(i, price)| !price.is_nan() && *i <= MAX_DAYS_AFTER_REPORT_SHARE_PRICE)
             .map(|(i, price)| price)
             .unwrap_or(&f32::NAN);
+    }
 
-        Some(())
+    IncomeStatementFields => {
+        yearly_financial!(TotalOutstandingShares) = data!(Shares);
+        yearly_financial!(Eps) = (data!(NetIncome) * 0.90) / data!(Shares);
+    }
+
+    CashFlowFields => {
+        yearly_financial!(CashFlow) = data!(NetCash);
     }
 }
 
-#[repr(usize)]
-#[derive(
-    PartialEq, Eq, Hash, IntoEnumIterator, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone,
-)]
-enum IncomeStatementFields {
-    Shares = 7,
-}
-impl Fields for IncomeStatementFields {}
-
-impl YearlyFields for IncomeStatementFields {
-    fn to_yearly(
-        self_data: &HashMap<Self, f32>,
-        _: ArrayView1<'_, f32>,
-        mut out: ArrayViewMut1<'_, f32>,
-    ) -> Option<()> {
-        // TODO: what to do here?
-        Some(())
-    }
-}
-
-#[repr(usize)]
-#[derive(
-    PartialEq, Eq, Hash, IntoEnumIterator, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone,
-)]
-enum CashFlowFields {
-    NetCash = 17,
-}
-impl Fields for CashFlowFields {}
-
-impl YearlyFields for CashFlowFields {
-    fn to_yearly(
-        self_data: &HashMap<Self, f32>,
-        _: ArrayView1<'_, f32>,
-        mut out: ArrayViewMut1<'_, f32>,
-    ) -> Option<()> {
-        out[YearlyField::CashFlow as usize] = *self_data.get(&Self::NetCash)?;
-
-        Some(())
-    }
-}
-
-#[repr(usize)]
-#[derive(
-    PartialEq, Eq, Hash, IntoEnumIterator, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone,
-)]
-enum SharePriceFields {
-    High = 5,
-}
-impl Fields for SharePriceFields {}
-
-impl DailyFields for SharePriceFields {
-    fn to_daily(self_data: &HashMap<Self, f32>, mut out: ArrayViewMut1<'_, f32>) -> Option<()> {
-        out[DailyField::HighSharePrice as usize] = *self_data.get(&Self::High)?;
-
-        Some(())
-    }
-}
-
-#[async_trait]
-impl<R: FetcherRead> Fetch for Fetcher<R> {
-    type StorageReprError = anyhow::Error;
-
-    async fn to_storage_repr(&mut self) -> anyhow::Result<StorageRepr> {
-        let companies = Fetcher::parse_company_csv(&mut self.companies, COMPANIES_FILENAME).await?;
-
-        let bs_opts = ParseOptions {
-            sheet_name: BALANCE_SHEET_FILENAME,
-            columns: HashSet::from_iter(BalanceSheetFields::into_enum_iter()),
-            companies: &companies,
-            entry_date_column: 6,       // "Publish Date"
-            classifying_year_column: 3, // "Fiscal Year"
-            classifying_year_column_is_date: false,
-        };
-
-        let bs_stream = Fetcher::parse_sheet_csv(&mut self.balance_sheet, &bs_opts);
-
-        let cf_opts = ParseOptions {
-            sheet_name: CASH_FLOW_FILENAME,
-            columns: HashSet::from_iter(CashFlowFields::into_enum_iter()),
-            companies: &companies,
-            entry_date_column: 6,       // "Publish Date"
-            classifying_year_column: 3, // "Fiscal Year"
-            classifying_year_column_is_date: false,
-        };
-
-        let cf_stream = Fetcher::parse_sheet_csv(&mut self.cash_flow, &cf_opts);
-
-        let is_opts = ParseOptions {
-            sheet_name: INCOME_STATEMENT_FILENAME,
-            columns: HashSet::from_iter(IncomeStatementFields::into_enum_iter()),
-            companies: &companies,
-            entry_date_column: 6,       // "Publish Date"
-            classifying_year_column: 3, // "Fiscal Year"
-            classifying_year_column_is_date: false,
-        };
-
-        let is_stream = Fetcher::parse_sheet_csv(&mut self.income_statement, &is_opts);
-
-        let sp_opts = ParseOptions {
-            sheet_name: SHARE_PRICES_FILENAME,
-            columns: HashSet::from_iter(SharePriceFields::into_enum_iter()),
-            companies: &companies,
-            entry_date_column: 2,       // "Publish Date"
-            classifying_year_column: 2, // "Fiscal Year"
-            classifying_year_column_is_date: true,
-        };
-
-        let sp_stream = Fetcher::parse_sheet_csv(&mut self.share_prices, &sp_opts);
-
-        let mut yearly_map: HashMap<i32, Array2<f32>> = HashMap::new();
-        let mut daily_map: HashMap<i32, Array3<f32>> = HashMap::new();
-
-        // run for share prices
-        sp_stream
-            .try_for_each(|parse_result| {
-                let mut array = daily_map
-                    .entry(parse_result.classifying_year)
-                    .or_insert_with(|| {
-                        Array3::from_elem(
-                            (
-                                NaiveDate::from_ymd(parse_result.classifying_year, 12, 31).ordinal()
-                                    as usize,
-                                DailyField::VARIANT_COUNT,
-                                companies.len(),
-                            ),
-                            f32::NAN,
-                        )
-                    });
-
-                let result = SharePriceFields::to_daily(
-                    &parse_result.data,
-                    array.slice_mut(s![
-                        parse_result.entry_date.ordinal0() as usize,
-                        ..,
-                        parse_result.company_index
-                    ]),
-                )
-                .ok_or(
-                    FileParsingError(
-                        SHARE_PRICES_FILENAME.to_string(),
-                        "error while mapping to StorageRepr".to_string(),
-                    )
-                    .into(),
-                );
-
-                future::ready(result)
-            })
-            .await?;
-
-        async fn run_for_yearly<F: YearlyFields>(
-            stream: impl Stream<Item = anyhow::Result<ParseResult<F>>>,
-            yearly_map: &mut HashMap<i32, Array2<f32>>,
-            daily_map: &HashMap<i32, Array3<f32>>,
-            companies: &HashMap<String, usize>,
-            sheet_name: &str,
-        ) -> anyhow::Result<()> {
-            stream
-                .try_for_each(|parse_result| {
-                    let mut yearly_array = yearly_map
-                        .entry(parse_result.classifying_year)
-                        .or_insert_with(|| {
-                            Array2::from_elem(
-                                (YearlyField::VARIANT_COUNT, companies.len()),
-                                f32::NAN,
-                            )
-                        });
-
-                    let result = F::to_yearly(
-                        &parse_result.data,
-                        daily_map
-                            .get(&parse_result.classifying_year)
-                            .expect(&format!(
-                                "no daily data for year {}!",
-                                parse_result.classifying_year
-                            ))
-                            .slice(s![
-                                parse_result.entry_date.ordinal0() as usize..,
-                                DailyField::HighSharePrice as usize,
-                                parse_result.company_index
-                            ]),
-                        yearly_array.slice_mut(s![.., parse_result.company_index]),
-                    )
-                    .ok_or(
-                        FileParsingError(
-                            sheet_name.to_string(),
-                            "error while mapping to StorageRepr".to_string(),
-                        )
-                        .into(),
-                    );
-
-                    future::ready(result)
-                })
-                .await
-        };
-
-        // We could do this concurrently with a ConcurrentHashMap, but who cares? It's already so
-        // fast.
-        run_for_yearly(
-            bs_stream,
-            &mut yearly_map,
-            &daily_map,
-            &companies,
-            BALANCE_SHEET_FILENAME,
-        )
-        .await?;
-        run_for_yearly(
-            cf_stream,
-            &mut yearly_map,
-            &daily_map,
-            &companies,
-            CASH_FLOW_FILENAME,
-        )
-        .await?;
-        run_for_yearly(
-            is_stream,
-            &mut yearly_map,
-            &daily_map,
-            &companies,
-            INCOME_STATEMENT_FILENAME,
-        )
-        .await?;
-
-        Ok(StorageRepr {
-            companies,
-            yearly: yearly_map,
-            daily: daily_map,
-        })
+impl_daily! {
+    SharePriceFields => {
+        daily_financial!(HighSharePrice) = data!(High);
     }
 }
