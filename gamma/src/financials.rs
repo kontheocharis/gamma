@@ -99,7 +99,10 @@ where
     }
 
     pub fn index_to_company(&self, index: usize) -> &str {
-        self.companies.iter().find_map(|(k, &v)| if v == index { Some(k.as_ref()) } else { None }).unwrap()
+        self.companies
+            .iter()
+            .find_map(|(k, &v)| if v == index { Some(k.as_ref()) } else { None })
+            .unwrap()
     }
 
     pub fn year_range(&self) -> (i32, i32) {

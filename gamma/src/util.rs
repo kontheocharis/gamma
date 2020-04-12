@@ -1,3 +1,6 @@
+use enum_iterator::IntoEnumIterator;
+use std::convert::TryFrom;
+
 #[macro_export]
 macro_rules! try_some {
     ($expr:expr) => {
@@ -12,3 +15,5 @@ macro_rules! try_some {
         try_some!($expr)
     };
 }
+
+pub trait IndexEnum = IntoEnumIterator + Into<usize> + TryFrom<usize> + Copy + Clone + PartialEq + Eq;

@@ -13,12 +13,12 @@ use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayViewMut1};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 use tokio::fs::File;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
+use tokio::io::{self, AsyncBufRead, AsyncBufReadExt, BufReader};
 use tokio::try_join;
 
 use crate::fetching::{Fetch, StorageRepr};
 use crate::financials::{DailyField, YearlyField};
-use crate::util;
+use crate::util::IndexEnum;
 
 const BALANCE_SHEET_FILENAME: &str = "us-balance-annual.csv";
 const CASH_FLOW_FILENAME: &str = "us-cashflow-annual.csv";
@@ -130,85 +130,87 @@ impl<R: FetcherRead> Fetcher<R> {
     fn parse_sheet_csv<'a, F: Fields>(
         sheet: &'a mut R,
         options: &'a ParseOptions<'a, F>,
-    ) -> impl TryStream<Ok = ParseResult<F>, Error = anyhow::Error> + 'a {
-        sheet
-            .lines()
-            .skip(1) // We don't want the headers
-            .filter_map(async move |line| -> Option<anyhow::Result<_>> {
-                let mut company_index = None;
-                let mut entry_date = None;
-                let mut classifying_year = None;
-                let mut data = HashMap::new(); // Vec::with_capacity(options.columns.len());
+    ) -> impl Stream<Item = anyhow::Result<ParseResult<F>, anyhow::Error>> + 'a {
+        let parse_line = move |line: io::Result<String>| -> anyhow::Result<Option<_>> {
+            let mut company_index = None;
+            let mut entry_date = None;
+            let mut classifying_year = None;
+            let mut data = HashMap::new(); // Vec::with_capacity(options.columns.len());
 
-                for (i, element) in try_some!(line).split(CSV_SEP).enumerate() {
-                    if i == 0 {
-                        if element.contains("_old") {
-                            return None;
+            for (i, element) in line?.split(CSV_SEP).enumerate() {
+                if i == 0 {
+                    if element.contains("_old") {
+                        return Ok(None);
+                    } else {
+                        if let Some(&index) = options.companies.get(element) {
+                            company_index = Some(index);
                         } else {
-                            if let Some(&index) = options.companies.get(element) {
-                                company_index = Some(index);
-                            } else {
-                                log::info!(
-                                    "skipping company {} in {} not present in company map",
-                                    element,
-                                    options.sheet_name,
-                                );
-                                return None;
-                            }
-                        }
-                    }
-                    if i == options.entry_date_column {
-                        entry_date = Some(try_some!(NaiveDate::parse_from_str(element, "%F")));
-                    }
-                    if i == options.classifying_year_column {
-                        classifying_year = Some(if options.classifying_year_column_is_date {
-                            try_some!(NaiveDate::parse_from_str(element, "%F")).year()
-                        } else {
-                            try_some!(element.parse::<i32>().map_err(|_| {
-                                FileParsingError(
-                                    options.sheet_name.to_string(),
-                                    format!("unable to parse into year: {}", element),
-                                )
-                            }))
-                        });
-                    }
-
-                    if let Ok((true, field @ _)) =
-                        F::try_from(i).map(|f| (options.columns.contains(&f), f))
-                    {
-                        if element.is_empty() {
-                            data.insert(field, f32::NAN);
-                        } else {
-                            data.insert(
-                                field,
-                                try_some!(element.parse::<f32>().map_err(|_| {
-                                    FileParsingError(
-                                        options.sheet_name.to_string(),
-                                        format!("unable to parse into float: {}", element),
-                                    )
-                                })),
+                            log::info!(
+                                "skipping company {} in {} not present in company map",
+                                element,
+                                options.sheet_name,
                             );
+                            return Ok(None);
                         }
                     }
                 }
+                if i == options.entry_date_column {
+                    entry_date = Some(NaiveDate::parse_from_str(element, "%F")?);
+                }
+                if i == options.classifying_year_column {
+                    classifying_year = Some(if options.classifying_year_column_is_date {
+                        NaiveDate::parse_from_str(element, "%F")?.year()
+                    } else {
+                        element.parse::<i32>().map_err(|_| {
+                            FileParsingError(
+                                options.sheet_name.to_string(),
+                                format!("unable to parse into year: {}", element),
+                            )
+                        })?
+                    });
+                }
 
-                Some(Ok(try_some!((|| {
-                    Some(ParseResult {
-                        company_index: company_index?,
-                        entry_date: entry_date?,
-                        classifying_year: classifying_year?,
-                        data: data,
-                    })
-                })()
-                .ok_or(FileParsingError(
+                if let Ok((true, field @ _)) =
+                    F::try_from(i).map(|f| (options.columns.contains(&f), f))
+                {
+                    if element.is_empty() {
+                        data.insert(field, f32::NAN);
+                    } else {
+                        let parsed_float = element.parse::<f32>().map_err(|_| {
+                            FileParsingError(
+                                options.sheet_name.to_string(),
+                                format!("unable to parse into float: {}", element),
+                            )
+                        })?;
+
+                        data.insert(field, parsed_float);
+                    }
+                }
+            }
+
+            if company_index.is_none() || entry_date.is_none() || classifying_year.is_none() {
+                Err(FileParsingError(
                     options.sheet_name.to_string(),
                     "something went wrong, some indices could not be parsed".to_string(),
-                )))))
-            })
+                ))?
+            } else {
+                Ok(Some(ParseResult {
+                    company_index: company_index.unwrap(),
+                    entry_date: entry_date.unwrap(),
+                    classifying_year: classifying_year.unwrap(),
+                    data: data,
+                }))
+            }
+        };
+
+        sheet
+            .lines()
+            .skip(1) // We don't want the headers
+            .filter_map(async move |line| parse_line(line).transpose())
     }
 }
 
-trait Fields: Into<usize> + TryFrom<usize> + IntoEnumIterator + Eq + Hash {}
+trait Fields: IndexEnum + Hash {}
 
 trait YearlyFields: Fields {
     fn to_yearly(
@@ -375,6 +377,7 @@ impl<R: FetcherRead> Fetch for Fetcher<R> {
         let mut yearly_map: HashMap<i32, Array2<f32>> = HashMap::new();
         let mut daily_map: HashMap<i32, Array3<f32>> = HashMap::new();
 
+        // run for share prices
         sp_stream
             .try_for_each(|parse_result| {
                 let mut array = daily_map
@@ -391,7 +394,7 @@ impl<R: FetcherRead> Fetch for Fetcher<R> {
                         )
                     });
 
-                future::ready(Ok(SharePriceFields::to_daily(
+                let result = SharePriceFields::to_daily(
                     &parse_result.data,
                     array.slice_mut(s![
                         parse_result.entry_date.ordinal0() as usize,
@@ -399,12 +402,20 @@ impl<R: FetcherRead> Fetch for Fetcher<R> {
                         parse_result.company_index
                     ]),
                 )
-                .expect("something went wrong while mapping to StorageRepr")))
+                .ok_or(
+                    FileParsingError(
+                        SHARE_PRICES_FILENAME.to_string(),
+                        "error while mapping to StorageRepr".to_string(),
+                    )
+                    .into(),
+                );
+
+                future::ready(result)
             })
             .await?;
 
         async fn run_for_yearly<F: YearlyFields>(
-            stream: impl TryStream<Ok = ParseResult<F>, Error = anyhow::Error>,
+            stream: impl Stream<Item = anyhow::Result<ParseResult<F>>>,
             yearly_map: &mut HashMap<i32, Array2<f32>>,
             daily_map: &HashMap<i32, Array3<f32>>,
             companies: &HashMap<String, usize>,
@@ -421,30 +432,30 @@ impl<R: FetcherRead> Fetch for Fetcher<R> {
                             )
                         });
 
-                    future::ready(
-                        F::to_yearly(
-                            &parse_result.data,
-                            daily_map
-                                .get(&parse_result.classifying_year)
-                                .expect(&format!(
-                                    "no daily data for year {}!",
-                                    parse_result.classifying_year
-                                ))
-                                .slice(s![
-                                    parse_result.entry_date.ordinal0() as usize..,
-                                    DailyField::HighSharePrice as usize,
-                                    parse_result.company_index
-                                ]),
-                            yearly_array.slice_mut(s![.., parse_result.company_index]),
-                        )
-                        .ok_or(
-                            FileParsingError(
-                                sheet_name.to_string(),
-                                "error while mapping to StorageRepr".to_string(),
-                            )
-                            .into(),
-                        ),
+                    let result = F::to_yearly(
+                        &parse_result.data,
+                        daily_map
+                            .get(&parse_result.classifying_year)
+                            .expect(&format!(
+                                "no daily data for year {}!",
+                                parse_result.classifying_year
+                            ))
+                            .slice(s![
+                                parse_result.entry_date.ordinal0() as usize..,
+                                DailyField::HighSharePrice as usize,
+                                parse_result.company_index
+                            ]),
+                        yearly_array.slice_mut(s![.., parse_result.company_index]),
                     )
+                    .ok_or(
+                        FileParsingError(
+                            sheet_name.to_string(),
+                            "error while mapping to StorageRepr".to_string(),
+                        )
+                        .into(),
+                    );
+
+                    future::ready(result)
                 })
                 .await
         };
