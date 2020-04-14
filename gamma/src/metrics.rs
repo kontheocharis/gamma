@@ -1,13 +1,13 @@
 use std::fmt;
 
-use chrono::{NaiveDate, Datelike};
+use chrono::{Datelike, NaiveDate};
 use enum_iterator::IntoEnumIterator;
 use ndarray::prelude::*;
-use ndarray::{azip, Array1, Array2, ArrayView1, ArrayView2, Axis, ScalarOperand, Zip};
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 
-use crate::financials::{Companies, DailyField, Financials, YearlyField};
+use crate::financials::{DailyField, Financials, YearlyField};
 use crate::util::IndexEnum;
 
 pub mod v1 {
@@ -180,10 +180,7 @@ pub mod v1 {
             // ndarray::Zip doesn't support this many elements at once :(
             let evalutated = (0..companies_count)
                 .filter_map(|i| {
-                    if Field::into_enum_iter()
-                        .map(|field| self.get_metric(field)[i])
-                        .any(f32::is_nan)
-                    {
+                    if self.get_company(i).iter().any(|value| value.is_nan()) {
                         None
                     } else {
                         let decision = metric!(Cnav1, i) > metric!(BuySharePrice, i)

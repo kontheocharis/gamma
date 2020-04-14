@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
-use std::iter::{self, FromIterator};
+use std::iter::{self};
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;

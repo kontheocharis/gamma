@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 #![feature(async_closure)]
 #![feature(trait_alias)]
 #![feature(nll)]
@@ -14,16 +15,16 @@ mod metrics;
 mod simfin;
 
 use std::collections::HashMap;
-use std::path;
+
 
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use enum_iterator::IntoEnumIterator;
-use ndarray::{s, Array2, Array3};
+use ndarray::{Array2, Array3};
 use thiserror::Error;
 
 use crate::fetching::{Fetch, StorageRepr};
-use crate::financials::{Companies, Financials, Options, YearlyField};
+use crate::financials::{Companies, Financials, Options};
 use crate::metrics::v1;
 
 fn setup_logger() -> Result<(), fern::InitError> {
@@ -159,6 +160,7 @@ async fn main() -> anyhow::Result<()> {
 
     let evaluated = metrics.evaluate();
 
+    // XXX: Returns an empty array, but why ?!?!?
     println!(
         "{:?}",
         evaluated

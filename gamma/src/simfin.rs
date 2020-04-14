@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
 use std::hash::Hash;
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
@@ -9,8 +8,8 @@ use async_trait::async_trait;
 use chrono::{Datelike, NaiveDate};
 use enum_iterator::IntoEnumIterator;
 use futures::prelude::*;
-use itertools::izip;
-use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayViewMut1};
+
+use ndarray::{s, Array2, Array3, ArrayView2, ArrayViewMut1, Axis};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 use tokio::fs::File;
@@ -201,15 +200,15 @@ impl<R: FetcherRead> Fetcher<R> {
         company_sheet: &mut R,
         sheet_name: &str,
     ) -> anyhow::Result<Companies> {
-        let mut curr_i = AtomicUsize::new(0);
+        let curr_i = AtomicUsize::new(0);
 
         let parse_line = |line: io::Result<String>| -> anyhow::Result<Option<_>> {
             let result = line?
                 .split(CSV_SEP)
                 .nth(0)
                 .ok_or(FileParsingError(
-                        sheet_name.to_string(),
-                        "company column not found".to_string(),
+                    sheet_name.to_string(),
+                    "company column not found".to_string(),
                 ))?
                 .to_string();
 
@@ -313,7 +312,7 @@ async fn run_for_yearly<F: YearlyFields>(
 ) -> anyhow::Result<()> {
     stream
         .try_for_each(|parse_result| {
-            let mut yearly_array = yearly_map
+            let yearly_array = yearly_map
                 .entry(parse_result.classifying_year)
                 .or_insert_with(|| {
                     Array2::from_elem((YearlyField::VARIANT_COUNT, companies.len()), f32::NAN)
@@ -329,7 +328,7 @@ async fn run_for_yearly<F: YearlyFields>(
                     ))
                     .slice(s![
                         parse_result.entry_date.ordinal0() as usize..,
-                        DailyField::HighSharePrice as usize,
+                        ..,
                         parse_result.company_index
                     ]),
                 yearly_array.slice_mut(s![.., parse_result.company_index]),
@@ -355,7 +354,7 @@ async fn run_for_daily<F: DailyFields>(
 ) -> anyhow::Result<()> {
     stream
         .try_for_each(|parse_result| {
-            let mut array = daily_map
+            let array = daily_map
                 .entry(parse_result.classifying_year)
                 .or_insert_with(|| {
                     Array3::from_elem(
@@ -395,7 +394,7 @@ trait Fields: IndexEnum + Hash {}
 trait YearlyFields: Fields {
     fn to_yearly(
         self_data: &HashMap<Self, f32>,
-        stock_data_after: ArrayView1<'_, f32>,
+        stock_data_after: ArrayView2<'_, f32>,
         out: ArrayViewMut1<'_, f32>,
     ) -> Option<()>;
 }
@@ -408,9 +407,13 @@ macro_rules! impl_yearly {
     ($($t:ty => $body:expr)*) => {
         $(
             impl YearlyFields for $t {
+                // Rust does not handle this nested macro business very well. Maybe a bug should be
+                // filed. In any case, this code is rather horrible.
+                #[allow(unused_variables)]
+                #[allow(unused_macros)]
                 fn to_yearly(
                     self_data: &HashMap<Self, f32>,
-                    stock_data_after: ArrayView1<'_, f32>,
+                    daily_data_after: ArrayView2<'_, f32>,
                     mut out: ArrayViewMut1<'_, f32>,
                 ) -> Option<()> {
                     macro_rules! yearly_financial {
@@ -425,10 +428,9 @@ macro_rules! impl_yearly {
                         };
                     }
 
-                    // ew macro hygiene sucks sometimes...
-                    macro_rules! stock_data_after {
-                        () => {
-                            stock_data_after
+                    macro_rules! daily_data {
+                        ($field: ident) => {
+                            daily_data_after.index_axis(Axis(1), DailyField::$field as usize)
                         };
                     }
 
@@ -523,13 +525,13 @@ impl_yearly! {
 
         yearly_financial!(TotalShareholdersEquity) = data!(TotalEquity);
 
-        yearly_financial!(SharePriceAtReport) = *stock_data_after!()
+        yearly_financial!(SharePriceAtReport) = daily_data!(HighSharePrice)
             .iter()
             .enumerate()
             .skip(MIN_DAYS_AFTER_REPORT_SHARE_PRICE)
-            .find(|(i, price)| !price.is_nan() && *i <= MAX_DAYS_AFTER_REPORT_SHARE_PRICE)
-            .map(|(i, price)| price)
-            .unwrap_or(&f32::NAN);
+            .find(|&(i, price)| !price.is_nan() && i <= MAX_DAYS_AFTER_REPORT_SHARE_PRICE)
+            .map(|(_i, &price)| price)
+            .unwrap_or(f32::NAN);
     }
 
     IncomeStatementFields => {
