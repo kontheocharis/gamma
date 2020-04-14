@@ -3,6 +3,7 @@ use std::convert::TryFrom;
 use std::hash::Hash;
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use chrono::{Datelike, NaiveDate};
@@ -200,21 +201,30 @@ impl<R: FetcherRead> Fetcher<R> {
         company_sheet: &mut R,
         sheet_name: &str,
     ) -> anyhow::Result<Companies> {
-        company_sheet
-            .lines()
-            .enumerate()
-            .map(|(i, line)| {
-                let result = line?
-                    .split(CSV_SEP)
-                    .nth(0)
-                    .ok_or(FileParsingError(
+        let mut curr_i = AtomicUsize::new(0);
+
+        let parse_line = |line: io::Result<String>| -> anyhow::Result<Option<_>> {
+            let result = line?
+                .split(CSV_SEP)
+                .nth(0)
+                .ok_or(FileParsingError(
                         sheet_name.to_string(),
                         "company column not found".to_string(),
-                    ))?
-                    .to_string();
+                ))?
+                .to_string();
 
-                Ok((result, i))
-            })
+            if result.contains("_old") {
+                Ok(None)
+            } else {
+                let old_i = curr_i.fetch_add(1, Ordering::SeqCst);
+                Ok(Some((result, old_i)))
+            }
+        };
+
+        company_sheet
+            .lines()
+            .skip(1)
+            .filter_map(async move |line| parse_line(line).transpose())
             .try_collect()
             .await
     }
@@ -231,15 +241,11 @@ impl<R: FetcherRead> Fetcher<R> {
 
             for (i, element) in line?.split(CSV_SEP).enumerate() {
                 if i == 0 {
-                    if element.contains("_old") {
-                        return Ok(None);
+                    if let Some(&index) = options.companies.get(element) {
+                        company_index = Some(index);
                     } else {
-                        if let Some(&index) = options.companies.get(element) {
-                            company_index = Some(index);
-                        } else {
-                            // Skip if not present
-                            return Ok(None);
-                        }
+                        // Skip if not present
+                        return Ok(None);
                     }
                 }
                 if i == options.entry_date_column {

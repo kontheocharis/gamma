@@ -1,12 +1,13 @@
 use std::fmt;
 
+use chrono::{NaiveDate, Datelike};
 use enum_iterator::IntoEnumIterator;
 use ndarray::prelude::*;
 use ndarray::{azip, Array1, Array2, ArrayView1, ArrayView2, Axis, ScalarOperand, Zip};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 
-use crate::financials::{Financials, YearlyField};
+use crate::financials::{Companies, DailyField, Financials, YearlyField};
 use crate::util::IndexEnum;
 
 pub mod v1 {
@@ -20,8 +21,8 @@ pub mod v1 {
 
     #[derive(Debug, Clone)]
     pub struct Options {
-        pub year: i32,
         pub cash_flows_back: usize, // how many years to consider positive cash flow including this one.
+        pub buy_date: NaiveDate,
     }
 
     #[repr(usize)]
@@ -31,6 +32,7 @@ pub mod v1 {
         Nav,
         PeRatio,
         CashFlows,
+        BuySharePrice, // from daily
         DebtToEquityRatio,
         PotentialRoi,
         MarketCap,
@@ -55,6 +57,8 @@ pub mod v1 {
                 f32::NAN,
             );
 
+            let year = options.buy_date.year();
+
             macro_rules! metric_set {
                 ($field: ident, $contents: expr) => {
                     let contents = $contents;
@@ -70,50 +74,66 @@ pub mod v1 {
                 };
             }
 
-            macro_rules! financial {
+            macro_rules! yearly_financial {
                 ($field: ident) => {
                     financials.yearly().slice(s![
-                        financials.year_to_index(options.year),
+                        financials.year_to_index(year),
                         YearlyField::$field as usize,
                         ..
                     ])
                 };
             }
 
+            macro_rules! daily_financial {
+                ($field: ident, $date: expr) => {
+                    financials
+                        .daily()
+                        .slice(s![$date, DailyField::$field as usize, ..])
+                };
+            }
+
+            metric_set!(
+                BuySharePrice,
+                daily_financial!(HighSharePrice, financials.date_to_index(options.buy_date))
+            );
+
             metric_set!(
                 Nav,
-                (&financial!(TotalAssets) - &financial!(TotalLiabilities))
-                    / &financial!(TotalOutstandingShares)
+                (&yearly_financial!(TotalAssets) - &yearly_financial!(TotalLiabilities))
+                    / &yearly_financial!(TotalOutstandingShares)
             );
 
             let total_good_assets =
-                &financial!(CashShortTermInvestments) + &(&financial!(Ppe) / 2.0);
+                &yearly_financial!(CashShortTermInvestments) + &(&yearly_financial!(Ppe) / 2.0);
 
             metric_set!(
                 Cnav1,
-                (total_good_assets - &financial!(TotalLiabilities))
-                    / &financial!(TotalOutstandingShares)
+                (total_good_assets - &yearly_financial!(TotalLiabilities))
+                    / &yearly_financial!(TotalOutstandingShares)
             );
 
-            metric_set!(PeRatio, &financial!(SharePriceAtReport) / &financial!(Eps));
+            metric_set!(
+                PeRatio,
+                &yearly_financial!(SharePriceAtReport) / &yearly_financial!(Eps)
+            );
 
             metric_set!(
                 DebtToEquityRatio,
-                &financial!(TotalDebt) / &financial!(TotalShareholdersEquity)
+                &yearly_financial!(TotalDebt) / &yearly_financial!(TotalShareholdersEquity)
             );
 
             metric_set!(
                 PotentialRoi,
-                (&metric!(Nav) / &financial!(SharePriceAtReport)) - 1.0
+                (&metric!(Nav) - &metric!(Cnav1)) / &metric!(Cnav1)
             );
 
             metric_set!(
                 MarketCap,
-                &financial!(TotalOutstandingShares) * &financial!(SharePriceAtReport)
+                &yearly_financial!(TotalOutstandingShares) * &yearly_financial!(SharePriceAtReport)
             );
 
             metric_set!(CashFlows, {
-                let year_i = financials.year_to_index(options.year);
+                let year_i = financials.year_to_index(year);
 
                 if year_i < options.cash_flows_back {
                     return Err(CalculationError::InsufficientCashFlowData);
@@ -148,7 +168,7 @@ pub mod v1 {
             self.data.view()
         }
 
-        pub fn evaluate(&self) -> Investable {
+        pub fn evaluate(&self) -> Evaluated {
             let companies_count = self.data.len_of(Self::COMPANY_AXIS);
 
             macro_rules! metric {
@@ -158,33 +178,51 @@ pub mod v1 {
             }
 
             // ndarray::Zip doesn't support this many elements at once :(
-            let investable = (0..companies_count)
-                .map(|i| {
-                    metric!(Cnav1, i) < metric!(Nav, i)
-                        && metric!(PeRatio, i) < 15.0
-                        && metric!(CashFlows, i) > 0.0
-                        && metric!(DebtToEquityRatio, i) < 1.0
-                        && metric!(PotentialRoi, i) > 1.0
-                        && metric!(MarketCap, i) > 10.0_f32.powf(9.0)
+            let evalutated = (0..companies_count)
+                .filter_map(|i| {
+                    if Field::into_enum_iter()
+                        .map(|field| self.get_metric(field)[i])
+                        .any(f32::is_nan)
+                    {
+                        None
+                    } else {
+                        let decision = metric!(Cnav1, i) > metric!(BuySharePrice, i)
+                            && metric!(PeRatio, i) < 15.0
+                            && metric!(CashFlows, i) > 0.0
+                            && metric!(DebtToEquityRatio, i) < 1.0
+                            && metric!(PotentialRoi, i) > 2.0
+                            && metric!(MarketCap, i) > 10.0_f32.powf(9.0);
+                        Some(decision)
+                    }
                 })
                 .collect();
 
-            Investable(investable)
+            Evaluated { data: evalutated }
         }
     }
 
     #[derive(Debug)]
-    pub struct Investable(Array1<bool>); // Axis0: companies
+    pub struct Evaluated {
+        data: Array1<bool>,
+    }
 
-    impl fmt::Display for Investable {
+    impl fmt::Display for Evaluated {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "Investable: {:.2}%", self.percent_investable() * 100.0)
+            write!(f, "Evaluated: {:.2}%", self.percent_investable() * 100.0)
         }
     }
 
-    impl Investable {
+    impl Evaluated {
         pub fn percent_investable(&self) -> f32 {
-            self.0.iter().map(|&x| bool_to_f32(x)).sum::<f32>() / self.0.len() as f32
+            self.data.iter().map(|&x| bool_to_f32(x)).sum::<f32>() / self.data.len() as f32
+        }
+
+        pub fn companies_investable<'a>(&'a self) -> impl Iterator<Item = usize> + 'a {
+            self.data
+                .iter()
+                .enumerate()
+                .filter(|(_, &x)| x)
+                .map(|(i, _)| i)
         }
     }
 
@@ -197,11 +235,15 @@ pub mod v1 {
         }
     }
 
-    fn f32_to_bool(value: f32) -> bool {
-        if value > 0.0 {
-            true
+    fn f32_to_bool(value: f32) -> Option<bool> {
+        if value.is_nan() {
+            None
         } else {
-            false
+            if value > 0.0 {
+                Some(true)
+            } else {
+                Some(false)
+            }
         }
     }
 }

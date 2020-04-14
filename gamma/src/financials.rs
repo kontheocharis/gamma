@@ -57,8 +57,6 @@ impl Options {
 pub type Companies = HashMap<String, usize>;
 pub type YearlyData = Array3<f32>;
 pub type DailyData = Array3<f32>;
-pub type YearlyView<'a> = ArrayView3<'a, f32>;
-pub type DailyView<'a> = ArrayView3<'a, f32>;
 
 #[derive(Debug)]
 pub struct Financials {
@@ -68,23 +66,20 @@ pub struct Financials {
     daily_data: DailyData,  // Axis(0): day, Axis(1): x::Field, Axis(2): company
 }
 
-impl<'a> Financials
-where
-    Self: 'a,
-{
+impl Financials {
     pub const TIME_AXIS: Axis = Axis(0);
     pub const FIELD_AXIS: Axis = Axis(1);
     pub const COMPANY_AXIS: Axis = Axis(2);
 
-    pub fn yearly(&'a self) -> YearlyView<'a> {
-        self.yearly_data.view()
+    pub fn yearly<'a>(&'a self) -> &'a YearlyData {
+        &self.yearly_data
     }
 
-    pub fn daily(&'a self) -> DailyView<'a> {
-        self.daily_data.view()
+    pub fn daily<'a>(&'a self) -> &'a DailyData {
+        &self.daily_data
     }
 
-    pub fn companies(&'a self) -> &'a Companies {
+    pub fn companies<'a>(&'a self) -> &'a Companies {
         &self.companies
     }
 

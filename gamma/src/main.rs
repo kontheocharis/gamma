@@ -1,5 +1,6 @@
 #![feature(async_closure)]
 #![feature(trait_alias)]
+#![feature(nll)]
 
 // #[macro_use]
 // extern crate gamma_derive;
@@ -18,7 +19,7 @@ use std::path;
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use enum_iterator::IntoEnumIterator;
-use ndarray::{Array2, Array3, s};
+use ndarray::{s, Array2, Array3};
 use thiserror::Error;
 
 use crate::fetching::{Fetch, StorageRepr};
@@ -136,27 +137,35 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let options = Options {
-        yearly_min: 2016,
-        yearly_max: 2018,
-        daily_min: NaiveDate::from_ymd(2016, 1, 1),
-        daily_max: NaiveDate::from_ymd(2018, 1, 1),
+        yearly_min: 2013,
+        yearly_max: 2016,
+        daily_min: NaiveDate::from_ymd(2013, 1, 1),
+        daily_max: NaiveDate::from_ymd(2016, 12, 1),
     };
 
     let financials = match args[1].as_ref() {
         "reparse" => save_simfin(&args[2], options).await?,
         "cached" => cached_simfin(&args[2], options).await?,
-        _ => panic!("Unexpected argument")
+        _ => panic!("Unexpected argument"),
     };
 
     let metrics = v1::Metrics::calculate(
         &financials,
         v1::Options {
-            year: 2018,
-            cash_flows_back: 2,
+            cash_flows_back: 3,
+            buy_date: NaiveDate::from_ymd(2016, 12, 1),
         },
     )?;
 
-    println!("{}", metrics.evaluate());
+    let evaluated = metrics.evaluate();
+
+    println!(
+        "{:?}",
+        evaluated
+            .companies_investable()
+            .map(|i| financials.index_to_company(i))
+            .collect::<Vec<_>>()
+    );
 
     // OLD:
 

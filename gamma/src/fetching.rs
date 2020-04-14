@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
-use std::iter;
+use std::iter::{self, FromIterator};
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
@@ -63,7 +63,8 @@ impl StorageRepr {
             path: &PathBuf,
         ) -> anyhow::Result<T> {
             let mut file = File::open(path).await?;
-            let mut data = Vec::with_capacity(file.metadata().await?.len() as usize);
+            // let mut data = Vec::with_capacity(file.metadata().await?.len() as usize);
+            let mut data = Vec::new();
             file.read_to_end(&mut data).await?;
             Ok(bincode::deserialize(&data)?)
         }
