@@ -71,15 +71,15 @@ impl Financials {
     pub const FIELD_AXIS: Axis = Axis(1);
     pub const COMPANY_AXIS: Axis = Axis(2);
 
-    pub fn yearly<'a>(&'a self) -> &'a YearlyData {
+    pub fn yearly(&self) -> &YearlyData {
         &self.yearly_data
     }
 
-    pub fn daily<'a>(&'a self) -> &'a DailyData {
+    pub fn daily(&self) -> &DailyData {
         &self.daily_data
     }
 
-    pub fn companies<'a>(&'a self) -> &'a Companies {
+    pub fn companies(&self) -> &Companies {
         &self.companies
     }
 
@@ -135,11 +135,11 @@ impl Financials {
         path: P,
         options: Options,
     ) -> anyhow::Result<Financials> {
-        let path_ref = path.as_ref();
+        let path = path.as_ref();
         options.ensure_ok()?;
 
         let repr = StorageRepr::load_from_path(
-            path_ref,
+            path,
             (options.yearly_min, options.yearly_max),
             (options.daily_min.year(), options.daily_max.year()),
         )
@@ -161,7 +161,7 @@ impl Financials {
         );
 
         for year in options.yearly_min..=options.yearly_max {
-            let data = repr.yearly.get(&year).ok_or(InvalidOptionsError(format!(
+            let data = repr.yearly.get(&year).ok_or_else(|| InvalidOptionsError(format!(
                 "year {} not found for yearly data",
                 year
             )))?;
@@ -185,7 +185,7 @@ impl Financials {
 
         let mut curr_offset = 0;
         for year in daily_min_year..=daily_max_year {
-            let data = repr.daily.get(&year).ok_or(InvalidOptionsError(format!(
+            let data = repr.daily.get(&year).ok_or_else(|| InvalidOptionsError(format!(
                 "year {} not found for daily data",
                 year
             )))?;

@@ -1,22 +1,22 @@
 use std::collections::{HashMap, HashSet};
+use std::convert::{TryFrom, TryInto};
 use std::hash::Hash;
 use std::iter::FromIterator;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use chrono::{Datelike, NaiveDate};
 use enum_iterator::IntoEnumIterator;
 use futures::prelude::*;
-
 use ndarray::{s, Array2, Array3, ArrayView2, ArrayViewMut1, Axis};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 use tokio::fs::File;
-use tokio::io::{self, AsyncBufRead, AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
+use tokio::sync::Mutex;
 use tokio::try_join;
 
-use crate::fetching::{Fetch, StorageRepr};
+use crate::fetching::{DailyMap, Fetch, StorageRepr, YearlyMap};
 use crate::financials::{Companies, DailyField, YearlyField};
 use crate::util::IndexEnum;
 
@@ -35,7 +35,7 @@ const MAX_DAYS_AFTER_REPORT_SHARE_PRICE: usize = 10;
 pub trait FetcherRead = AsyncBufRead + Sync + Send + Unpin;
 
 #[derive(Debug)]
-pub struct Fetcher<R: FetcherRead> {
+pub struct Fetcher<R> {
     balance_sheet: R,
     cash_flow: R,
     income_statement: R,
@@ -50,86 +50,90 @@ impl<R: FetcherRead> Fetch for Fetcher<R> {
     async fn to_storage_repr(&mut self) -> anyhow::Result<StorageRepr> {
         let companies = Fetcher::parse_company_csv(&mut self.companies, COMPANIES_FILENAME).await?;
 
-        let bs_opts = ParseOptions {
-            sheet_name: BALANCE_SHEET_FILENAME,
-            columns: HashSet::from_iter(BalanceSheetFields::into_enum_iter()),
-            companies: &companies,
-            entry_date_column: 6,       // "Publish Date"
-            classifying_year_column: 3, // "Fiscal Year"
-            classifying_year_column_is_date: false,
-        };
+        let yearly_map = Mutex::new(YearlyMap::new());
+        let daily_map = Mutex::new(DailyMap::new());
 
-        let bs_stream = Fetcher::parse_sheet_csv(&mut self.balance_sheet, &bs_opts);
+        macro_rules! parse_csv {
+            (
+                frequency: $frequency:tt,
+                reader: $r:expr,
+                sheet_name: $sheet_name:expr,
+                fields: $fields:ident,
+                entry_date: $entry_date_column:expr,
+                classifying_year: $classifying_year_column:expr,
+                classifying_year_is_date: $classifying_year_column_is_date:expr,
+            ) => {{
+                let opts = ParseOptions {
+                    sheet_name: $sheet_name,
+                    columns: HashSet::from_iter($fields::into_enum_iter()),
+                    companies: &companies,
+                    entry_date_column: $entry_date_column, // "Publish Date"
+                    classifying_year_column: $classifying_year_column, // "Fiscal Year"
+                    classifying_year_column_is_date: $classifying_year_column_is_date,
+                };
 
-        let cf_opts = ParseOptions {
-            sheet_name: CASH_FLOW_FILENAME,
-            columns: HashSet::from_iter(CashFlowFields::into_enum_iter()),
-            companies: &companies,
-            entry_date_column: 6,       // "Publish Date"
-            classifying_year_column: 3, // "Fiscal Year"
-            classifying_year_column_is_date: false,
-        };
+                Fetcher::parse_sheet_csv(&mut $r, opts, |result| {
+                    parse_csv!(@ $frequency, $sheet_name, result)
+                })
+            }};
+            (@ "daily", $sheet_name:expr, $result:expr) => {
+                handle_daily_result($result, &daily_map, &companies, $sheet_name)
+            };
+            (@ "yearly", $sheet_name:expr, $result:expr) => {
+                handle_yearly_result($result, &yearly_map, &daily_map, &companies, $sheet_name)
+            };
+        }
 
-        let cf_stream = Fetcher::parse_sheet_csv(&mut self.cash_flow, &cf_opts);
-
-        let is_opts = ParseOptions {
-            sheet_name: INCOME_STATEMENT_FILENAME,
-            columns: HashSet::from_iter(IncomeStatementFields::into_enum_iter()),
-            companies: &companies,
-            entry_date_column: 6,       // "Publish Date"
-            classifying_year_column: 3, // "Fiscal Year"
-            classifying_year_column_is_date: false,
-        };
-
-        let is_stream = Fetcher::parse_sheet_csv(&mut self.income_statement, &is_opts);
-
-        let sp_opts = ParseOptions {
+        let share_prices_fut = parse_csv! {
+            frequency: "daily",
+            reader: self.share_prices,
             sheet_name: SHARE_PRICES_FILENAME,
-            columns: HashSet::from_iter(SharePriceFields::into_enum_iter()),
-            companies: &companies,
-            entry_date_column: 2,       // "Publish Date"
-            classifying_year_column: 2, // "Fiscal Year"
-            classifying_year_column_is_date: true,
+            fields: SharePriceFields,
+            entry_date: 2,
+            classifying_year: 2,
+            classifying_year_is_date: true,
         };
 
-        let sp_stream = Fetcher::parse_sheet_csv(&mut self.share_prices, &sp_opts);
+        let balance_sheet_fut = parse_csv! {
+            frequency: "yearly",
+            reader: self.balance_sheet,
+            sheet_name: BALANCE_SHEET_FILENAME,
+            fields: BalanceSheetFields,
+            entry_date: 6,
+            classifying_year: 3,
+            classifying_year_is_date: false,
+        };
 
-        let mut yearly_map: HashMap<i32, Array2<f32>> = HashMap::new();
-        let mut daily_map: HashMap<i32, Array3<f32>> = HashMap::new();
+        let cash_flow_fut = parse_csv! {
+            frequency: "yearly",
+            reader: self.cash_flow,
+            sheet_name: CASH_FLOW_FILENAME,
+            fields: CashFlowFields,
+            entry_date: 6,
+            classifying_year: 3,
+            classifying_year_is_date: false,
+        };
 
-        // We could do this concurrently with a ConcurrentHashMap, but who cares? It's already so
-        // fast.
-        run_for_daily(sp_stream, &mut daily_map, &companies, SHARE_PRICES_FILENAME).await?;
+        let income_statement_fut = parse_csv! {
+            frequency: "yearly",
+            reader: self.income_statement,
+            sheet_name: INCOME_STATEMENT_FILENAME,
+            fields: IncomeStatementFields,
+            entry_date: 6,
+            classifying_year: 3,
+            classifying_year_is_date: false,
+        };
 
-        run_for_yearly(
-            bs_stream,
-            &mut yearly_map,
-            &daily_map,
-            &companies,
-            BALANCE_SHEET_FILENAME,
-        )
-        .await?;
-        run_for_yearly(
-            cf_stream,
-            &mut yearly_map,
-            &daily_map,
-            &companies,
-            CASH_FLOW_FILENAME,
-        )
-        .await?;
-        run_for_yearly(
-            is_stream,
-            &mut yearly_map,
-            &daily_map,
-            &companies,
-            INCOME_STATEMENT_FILENAME,
-        )
-        .await?;
+        // first the share_prices
+        share_prices_fut.await?;
+
+        // then the rest
+        try_join!(balance_sheet_fut, cash_flow_fut, income_statement_fut)?;
 
         Ok(StorageRepr {
             companies,
-            yearly: yearly_map,
-            daily: daily_map,
+            yearly: yearly_map.into_inner(),
+            daily: daily_map.into_inner(),
         })
     }
 }
@@ -140,11 +144,11 @@ pub struct FileNotFoundError(PathBuf);
 
 impl Fetcher<BufReader<File>> {
     pub async fn from_local(path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let path_ref = path.as_ref();
+        let path = path.as_ref();
 
         let read_file = async move |file_path: PathBuf| -> anyhow::Result<_> {
             if !file_path.exists() {
-                Err(FileNotFoundError(file_path))?
+                Err(FileNotFoundError(file_path).into())
             } else {
                 Ok(BufReader::with_capacity(
                     READ_CAPACITY,
@@ -153,20 +157,12 @@ impl Fetcher<BufReader<File>> {
             }
         };
 
-        let files = try_join!(
-            read_file(path_ref.join(BALANCE_SHEET_FILENAME)),
-            read_file(path_ref.join(CASH_FLOW_FILENAME)),
-            read_file(path_ref.join(INCOME_STATEMENT_FILENAME)),
-            read_file(path_ref.join(SHARE_PRICES_FILENAME)),
-            read_file(path_ref.join(COMPANIES_FILENAME)),
-        )?;
-
         Ok(Fetcher {
-            balance_sheet: files.0,
-            cash_flow: files.1,
-            income_statement: files.2,
-            share_prices: files.3,
-            companies: files.4,
+            balance_sheet: read_file(path.join(BALANCE_SHEET_FILENAME)).await?,
+            cash_flow: read_file(path.join(CASH_FLOW_FILENAME)).await?,
+            income_statement: read_file(path.join(INCOME_STATEMENT_FILENAME)).await?,
+            share_prices: read_file(path.join(SHARE_PRICES_FILENAME)).await?,
+            companies: read_file(path.join(COMPANIES_FILENAME)).await?,
         })
     }
 }
@@ -178,7 +174,7 @@ pub struct FileParsingError(String, String);
 // Private
 
 #[derive(Debug)]
-struct ParseOptions<'a, F: Fields> {
+struct ParseOptions<'a, F> {
     sheet_name: &'a str,
     columns: HashSet<F>, // returned columns will be ordered in the way they appear
     companies: &'a Companies,
@@ -188,7 +184,7 @@ struct ParseOptions<'a, F: Fields> {
 }
 
 #[derive(Debug)]
-struct ParseResult<F: Fields> {
+struct ParseResult<F> {
     pub company_index: usize,
     pub entry_date: NaiveDate,
     pub classifying_year: i32,
@@ -200,193 +196,255 @@ impl<R: FetcherRead> Fetcher<R> {
         company_sheet: &mut R,
         sheet_name: &str,
     ) -> anyhow::Result<Companies> {
-        let curr_i = AtomicUsize::new(0);
+        let mut line = String::new();
+        let mut company_i = 0;
+        let mut companies = Companies::new();
 
-        let parse_line = |line: io::Result<String>| -> anyhow::Result<Option<_>> {
-            let result = line?
+        for i in 0.. {
+            line.clear();
+            if company_sheet.read_line(&mut line).await? == 0 {
+                break;
+            }
+
+            if i == 0 {
+                continue;
+            }
+
+            let company_name = line
                 .split(CSV_SEP)
-                .nth(0)
-                .ok_or(FileParsingError(
-                    sheet_name.to_string(),
-                    "company column not found".to_string(),
-                ))?
-                .to_string();
-
-            if result.contains("_old") {
-                Ok(None)
-            } else {
-                let old_i = curr_i.fetch_add(1, Ordering::SeqCst);
-                Ok(Some((result, old_i)))
-            }
-        };
-
-        company_sheet
-            .lines()
-            .skip(1)
-            .filter_map(async move |line| parse_line(line).transpose())
-            .try_collect()
-            .await
-    }
-
-    fn parse_sheet_csv<'a, F: Fields>(
-        sheet: &'a mut R,
-        options: &'a ParseOptions<'a, F>,
-    ) -> impl Stream<Item = anyhow::Result<ParseResult<F>, anyhow::Error>> + 'a {
-        let parse_line = move |line: io::Result<String>| -> anyhow::Result<Option<_>> {
-            let mut company_index = None;
-            let mut entry_date = None;
-            let mut classifying_year = None;
-            let mut data = HashMap::new(); // Vec::with_capacity(options.columns.len());
-
-            for (i, element) in line?.split(CSV_SEP).enumerate() {
-                if i == 0 {
-                    if let Some(&index) = options.companies.get(element) {
-                        company_index = Some(index);
-                    } else {
-                        // Skip if not present
-                        return Ok(None);
-                    }
-                }
-                if i == options.entry_date_column {
-                    entry_date = Some(NaiveDate::parse_from_str(element, "%F")?);
-                }
-                if i == options.classifying_year_column {
-                    classifying_year = Some(if options.classifying_year_column_is_date {
-                        NaiveDate::parse_from_str(element, "%F")?.year()
-                    } else {
-                        element.parse::<i32>().map_err(|_| {
-                            FileParsingError(
-                                options.sheet_name.to_string(),
-                                format!("unable to parse into year: {}", element),
-                            )
-                        })?
-                    });
-                }
-
-                if let Ok((true, field @ _)) =
-                    F::try_from(i).map(|f| (options.columns.contains(&f), f))
-                {
-                    if element.is_empty() {
-                        data.insert(field, f32::NAN);
-                    } else {
-                        let parsed_float = element.parse::<f32>().map_err(|_| {
-                            FileParsingError(
-                                options.sheet_name.to_string(),
-                                format!("unable to parse into float: {}", element),
-                            )
-                        })?;
-
-                        data.insert(field, parsed_float);
-                    }
-                }
-            }
-
-            if company_index.is_none() || entry_date.is_none() || classifying_year.is_none() {
-                Err(FileParsingError(
-                    options.sheet_name.to_string(),
-                    "something went wrong, some indices could not be parsed".to_string(),
-                ))?
-            } else {
-                Ok(Some(ParseResult {
-                    company_index: company_index.unwrap(),
-                    entry_date: entry_date.unwrap(),
-                    classifying_year: classifying_year.unwrap(),
-                    data: data,
-                }))
-            }
-        };
-
-        sheet
-            .lines()
-            .skip(1) // We don't want the headers
-            .filter_map(async move |line| parse_line(line).transpose())
-    }
-}
-
-async fn run_for_yearly<F: YearlyFields>(
-    stream: impl Stream<Item = anyhow::Result<ParseResult<F>>>,
-    yearly_map: &mut HashMap<i32, Array2<f32>>,
-    daily_map: &HashMap<i32, Array3<f32>>,
-    companies: &Companies,
-    sheet_name: &str,
-) -> anyhow::Result<()> {
-    stream
-        .try_for_each(|parse_result| {
-            let yearly_array = yearly_map
-                .entry(parse_result.classifying_year)
-                .or_insert_with(|| {
-                    Array2::from_elem((YearlyField::VARIANT_COUNT, companies.len()), f32::NAN)
-                });
-
-            let result = F::to_yearly(
-                &parse_result.data,
-                daily_map
-                    .get(&parse_result.classifying_year)
-                    .expect(&format!(
-                        "no daily data for year {}!",
-                        parse_result.classifying_year
-                    ))
-                    .slice(s![
-                        parse_result.entry_date.ordinal0() as usize..,
-                        ..,
-                        parse_result.company_index
-                    ]),
-                yearly_array.slice_mut(s![.., parse_result.company_index]),
-            )
-            .ok_or(
-                FileParsingError(
-                    sheet_name.to_string(),
-                    "error while mapping to StorageRepr".to_string(),
-                )
-                .into(),
-            );
-
-            future::ready(result)
-        })
-        .await
-}
-
-async fn run_for_daily<F: DailyFields>(
-    stream: impl Stream<Item = anyhow::Result<ParseResult<F>>>,
-    daily_map: &mut HashMap<i32, Array3<f32>>,
-    companies: &Companies,
-    sheet_name: &str,
-) -> anyhow::Result<()> {
-    stream
-        .try_for_each(|parse_result| {
-            let array = daily_map
-                .entry(parse_result.classifying_year)
-                .or_insert_with(|| {
-                    Array3::from_elem(
-                        (
-                            NaiveDate::from_ymd(parse_result.classifying_year, 12, 31).ordinal()
-                                as usize,
-                            DailyField::VARIANT_COUNT,
-                            companies.len(),
-                        ),
-                        f32::NAN,
+                .next() // only headers
+                .ok_or_else(|| {
+                    FileParsingError(
+                        sheet_name.to_string(),
+                        "company column not found".to_string(),
                     )
-                });
+                })?;
 
-            let result = F::to_daily(
-                &parse_result.data,
-                array.slice_mut(s![
-                    parse_result.entry_date.ordinal0() as usize,
-                    ..,
-                    parse_result.company_index
-                ]),
-            )
-            .ok_or(
-                FileParsingError(
-                    sheet_name.to_string(),
-                    "error while mapping to StorageRepr".to_string(),
-                )
-                .into(),
-            );
+            if company_name.contains("_old") {
+                continue;
+            }
 
-            future::ready(result)
+            companies.insert(company_name.to_string(), company_i);
+            company_i += 1;
+        }
+
+        Ok(companies)
+    }
+
+    async fn parse_sheet_csv<F, E, EFut>(
+        sheet: &mut R,
+        options: ParseOptions<'_, F>,
+        mut run_for_each: E,
+    ) -> anyhow::Result<()>
+    where
+        F: Fields,
+        EFut: Future<Output = anyhow::Result<()>>,
+        E: FnMut(ParseResult<F>) -> EFut,
+    {
+        let mut line = String::new();
+
+        'outer: for i in 0.. {
+            line.clear();
+            if sheet.read_line(&mut line).await? == 0 {
+                break;
+            }
+
+            if i == 0 {
+                continue;
+            }
+
+            // remove the new line because BufRead::read_line includes it.
+            let line = &line[..(line.len() - 1)];
+
+            match handle_csv_line(line, &options)? {
+                CsvLineDecision::Keep(outcome) => {
+                    let result = outcome.try_into().map_err(|_| {
+                        FileParsingError(
+                            options.sheet_name.to_string(),
+                            "something went wrong, some indices could not be parsed".to_string(),
+                        )
+                    })?;
+                    run_for_each(result).await?;
+                }
+                CsvLineDecision::Skip => continue 'outer,
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+enum CsvLineDecision<F> {
+    Keep(CsvLineOutcome<F>),
+    Skip,
+}
+
+#[derive(Debug)]
+struct CsvLineOutcome<F> {
+    company_index: Option<usize>,
+    entry_date: Option<NaiveDate>,
+    classifying_year: Option<i32>,
+    data: HashMap<F, f32>,
+}
+
+impl<F> Default for CsvLineOutcome<F> {
+    fn default() -> Self {
+        CsvLineOutcome {
+            company_index: None,
+            entry_date: None,
+            classifying_year: None,
+            data: HashMap::new(),
+        }
+    }
+}
+
+impl<F: Fields> TryFrom<CsvLineOutcome<F>> for ParseResult<F> {
+    type Error = ();
+    fn try_from(outcome: CsvLineOutcome<F>) -> Result<Self, ()> {
+        Ok(ParseResult {
+            company_index: outcome.company_index.ok_or(())?,
+            entry_date: outcome.entry_date.ok_or(())?,
+            classifying_year: outcome.classifying_year.ok_or(())?,
+            data: outcome.data,
         })
-        .await
+    }
+}
+
+fn handle_csv_line<F>(line: &str, options: &ParseOptions<F>) -> anyhow::Result<CsvLineDecision<F>>
+where
+    F: Fields,
+{
+    let mut outcome = CsvLineOutcome::default();
+
+    for (i_element, element) in line.split(CSV_SEP).enumerate() {
+        if i_element == 0 {
+            if let Some(&index) = options.companies.get(element) {
+                outcome.company_index = Some(index);
+            } else {
+                // Skip if not present
+                return Ok(CsvLineDecision::Skip);
+            }
+        }
+        if i_element == options.entry_date_column {
+            outcome.entry_date = Some(NaiveDate::parse_from_str(element, "%F")?);
+        }
+        if i_element == options.classifying_year_column {
+            outcome.classifying_year = if options.classifying_year_column_is_date {
+                Some(NaiveDate::parse_from_str(element, "%F")?.year())
+            } else {
+                let parsed = element.parse::<i32>().map_err(|_| {
+                    FileParsingError(
+                        options.sheet_name.to_string(),
+                        format!("unable to parse into year: {}", element),
+                    )
+                })?;
+
+                Some(parsed)
+            };
+        }
+
+        if let Ok((true, field)) = F::try_from(i_element).map(|f| (options.columns.contains(&f), f))
+        {
+            if element.is_empty() {
+                outcome.data.insert(field, f32::NAN);
+            } else {
+                let parsed_float = element.parse::<f32>().map_err(|_| {
+                    FileParsingError(
+                        options.sheet_name.to_string(),
+                        format!("unable to parse into float: {}", element),
+                    )
+                })?;
+
+                outcome.data.insert(field, parsed_float);
+            }
+        }
+    }
+
+    Ok(CsvLineDecision::Keep(outcome))
+}
+
+async fn handle_yearly_result<F>(
+    parse_result: ParseResult<F>,
+    yearly_map: &Mutex<YearlyMap>,
+    daily_map: &Mutex<DailyMap>,
+    companies: &Companies,
+    sheet_name: &str,
+) -> anyhow::Result<()>
+where
+    F: YearlyFields,
+{
+    let mut yearly_map = yearly_map.lock().await;
+    let daily_map = daily_map.lock().await;
+
+    let yearly_array = yearly_map
+        .entry(parse_result.classifying_year)
+        .or_insert_with(|| {
+            Array2::from_elem((YearlyField::VARIANT_COUNT, companies.len()), f32::NAN)
+        });
+
+    let daily_data_slice = daily_map
+        .get(&parse_result.classifying_year)
+        .unwrap_or_else(|| panic!("no daily data for year {}!", parse_result.classifying_year))
+        .slice(s![
+            parse_result.entry_date.ordinal0() as usize..,
+            ..,
+            parse_result.company_index
+        ]);
+
+    F::to_yearly(
+        &parse_result.data,
+        daily_data_slice,
+        yearly_array.slice_mut(s![.., parse_result.company_index]),
+    )
+    .ok_or_else(|| {
+        FileParsingError(
+            sheet_name.to_string(),
+            "error while mapping to StorageRepr".to_string(),
+        )
+        .into()
+    })
+}
+
+async fn handle_daily_result<F>(
+    parse_result: ParseResult<F>,
+    daily_map: &Mutex<DailyMap>,
+    companies: &Companies,
+    sheet_name: &str,
+) -> anyhow::Result<()>
+where
+    F: DailyFields,
+{
+    let mut daily_map = daily_map.lock().await;
+
+    let array = daily_map
+        .entry(parse_result.classifying_year)
+        .or_insert_with(|| {
+            Array3::from_elem(
+                (
+                    NaiveDate::from_ymd(parse_result.classifying_year, 12, 31).ordinal() as usize,
+                    DailyField::VARIANT_COUNT,
+                    companies.len(),
+                ),
+                f32::NAN,
+            )
+        });
+
+    F::to_daily(
+        &parse_result.data,
+        array.slice_mut(s![
+            parse_result.entry_date.ordinal0() as usize,
+            ..,
+            parse_result.company_index
+        ]),
+    )
+    .ok_or_else(|| {
+        FileParsingError(
+            sheet_name.to_string(),
+            "error while mapping to StorageRepr".to_string(),
+        )
+        .into()
+    })
 }
 
 trait Fields: IndexEnum + Hash {}

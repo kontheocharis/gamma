@@ -70,13 +70,13 @@ pub mod v1 {
 
             macro_rules! metric {
                 ($field: ident) => {
-                    metrics.index_axis(Self::FIELD_AXIS, Field::$field as usize)
+                    &metrics.index_axis(Self::FIELD_AXIS, Field::$field as usize)
                 };
             }
 
             macro_rules! yearly_financial {
                 ($field: ident) => {
-                    financials.yearly().slice(s![
+                    &financials.yearly().slice(s![
                         financials.year_to_index(year),
                         YearlyField::$field as usize,
                         ..
@@ -86,7 +86,7 @@ pub mod v1 {
 
             macro_rules! daily_financial {
                 ($field: ident, $date: expr) => {
-                    financials
+                    &financials
                         .daily()
                         .slice(s![$date, DailyField::$field as usize, ..])
                 };
@@ -99,37 +99,37 @@ pub mod v1 {
 
             metric_set!(
                 Nav,
-                (&yearly_financial!(TotalAssets) - &yearly_financial!(TotalLiabilities))
-                    / &yearly_financial!(TotalOutstandingShares)
+                (yearly_financial!(TotalAssets) - yearly_financial!(TotalLiabilities))
+                    / yearly_financial!(TotalOutstandingShares)
             );
 
             let total_good_assets =
-                &yearly_financial!(CashShortTermInvestments) + &(&yearly_financial!(Ppe) / 2.0);
+                (yearly_financial!(Ppe) / 2.0) + yearly_financial!(CashShortTermInvestments);
 
             metric_set!(
                 Cnav1,
-                (total_good_assets - &yearly_financial!(TotalLiabilities))
-                    / &yearly_financial!(TotalOutstandingShares)
+                (total_good_assets - yearly_financial!(TotalLiabilities))
+                    / yearly_financial!(TotalOutstandingShares)
             );
 
             metric_set!(
                 PeRatio,
-                &yearly_financial!(SharePriceAtReport) / &yearly_financial!(Eps)
+                yearly_financial!(SharePriceAtReport) / yearly_financial!(Eps)
             );
 
             metric_set!(
                 DebtToEquityRatio,
-                &yearly_financial!(TotalDebt) / &yearly_financial!(TotalShareholdersEquity)
+                yearly_financial!(TotalDebt) / yearly_financial!(TotalShareholdersEquity)
             );
 
             metric_set!(
                 PotentialRoi,
-                (&metric!(Nav) - &metric!(Cnav1)) / &metric!(Cnav1)
+                (metric!(Nav) - metric!(Cnav1)) / metric!(Cnav1)
             );
 
             metric_set!(
                 MarketCap,
-                &yearly_financial!(TotalOutstandingShares) * &yearly_financial!(SharePriceAtReport)
+                yearly_financial!(TotalOutstandingShares) * yearly_financial!(SharePriceAtReport)
             );
 
             metric_set!(CashFlows, {
@@ -156,11 +156,11 @@ pub mod v1 {
             })
         }
 
-        pub fn get_metric<'a>(&'a self, field: Field) -> ArrayView1<'a, f32> {
+        pub fn get_metric(&self, field: Field) -> ArrayView1<'_, f32> {
             self.data.index_axis(Self::FIELD_AXIS, field as usize)
         }
 
-        pub fn get_company<'a>(&'a self, company_index: usize) -> ArrayView1<'a, f32> {
+        pub fn get_company(&self, company_index: usize) -> ArrayView1<'_, f32> {
             self.data.index_axis(Self::COMPANY_AXIS, company_index)
         }
 
@@ -235,12 +235,10 @@ pub mod v1 {
     fn f32_to_bool(value: f32) -> Option<bool> {
         if value.is_nan() {
             None
+        } else if value > 0.0 {
+            Some(true)
         } else {
-            if value > 0.0 {
-                Some(true)
-            } else {
-                Some(false)
-            }
+            Some(false)
         }
     }
 }

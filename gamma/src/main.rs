@@ -16,7 +16,6 @@ mod simfin;
 
 use std::collections::HashMap;
 
-
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use enum_iterator::IntoEnumIterator;
@@ -134,7 +133,7 @@ async fn main() -> anyhow::Result<()> {
     setup_logger()?;
 
     if args.len() != 3 {
-        Err(anyhow::anyhow!("Usage: (reparse|cached) <dir>"))?
+        return Err(anyhow::anyhow!("Usage: (reparse|cached) <dir>"));
     }
 
     let options = Options {
