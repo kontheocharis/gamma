@@ -2,20 +2,22 @@ use std::fmt;
 
 use chrono::{Datelike, NaiveDate};
 use enum_iterator::IntoEnumIterator;
+use log::*;
 use ndarray::prelude::*;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 
-use crate::financials::{DailyField, Financials, YearlyField};
+use crate::financials::{Financials, YearlyField, DailyField};
 use crate::util::IndexEnum;
 
 pub mod v1 {
     use super::*;
 
     #[derive(Debug)]
-    pub struct Metrics {
+    pub struct Metrics<'a> {
         data: Array2<f32>, // Axis0: metrics, Axis1: companies
+        financials: &'a Financials,
         options: Options,
     }
 
@@ -44,12 +46,12 @@ pub mod v1 {
         InsufficientCashFlowData,
     }
 
-    impl Metrics {
+    impl<'a> Metrics<'a> {
         pub const FIELD_AXIS: Axis = Axis(0);
         pub const COMPANY_AXIS: Axis = Axis(1);
 
         pub fn calculate(
-            financials: &Financials,
+            financials: &'a Financials,
             options: Options,
         ) -> Result<Self, CalculationError> {
             let mut metrics = Array2::from_elem(
@@ -152,6 +154,7 @@ pub mod v1 {
 
             Ok(Metrics {
                 data: metrics,
+                financials: &financials,
                 options,
             })
         }
@@ -177,7 +180,6 @@ pub mod v1 {
                 };
             }
 
-            // ndarray::Zip doesn't support this many elements at once :(
             let evalutated = (0..companies_count)
                 .filter_map(|i| {
                     if self.get_company(i).iter().any(|value| value.is_nan()) {
