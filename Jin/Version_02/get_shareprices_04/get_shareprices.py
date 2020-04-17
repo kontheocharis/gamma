@@ -1,4 +1,4 @@
-import json
+import json, datetime
 import pandas as pd 
 import numpy as np
 
@@ -21,7 +21,7 @@ class get_shareprices(object):
 
 
     def get_buy_shareprices(self):
-
+        
         array_buy_shareprices = np.zeros(15000)    # Creating an empty np.array with 15,000 elements
         counter = 0
 

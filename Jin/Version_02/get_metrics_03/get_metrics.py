@@ -33,6 +33,3 @@ def get_metric_income(df_statement, dict_df_indices, fiscal_year, metric):
      # np.array is in the order of dict_df_indices
 
     
-    
-
-
