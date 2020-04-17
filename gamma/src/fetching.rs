@@ -146,8 +146,8 @@ async fn deserialize_from_path<T: serde::de::DeserializeOwned, P: AsRef<Path>>(
     path: P,
 ) -> anyhow::Result<T> {
     let mut file = File::open(path.as_ref()).await?;
-    let mut data = Vec::new();
-    file.read_to_end(&mut data).await?;
+    let mut data = vec![0; file.metadata().await?.len() as usize];
+    file.read_exact(&mut data).await?;
     Ok(bincode::deserialize(&data)?)
 }
 

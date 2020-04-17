@@ -243,7 +243,7 @@ impl<R: FetcherRead> Fetcher<R> {
     {
         let mut line = String::new();
 
-        'outer: for i in 0.. {
+        for i in 0.. {
             line.clear();
             if sheet.read_line(&mut line).await? == 0 {
                 break;
@@ -266,7 +266,7 @@ impl<R: FetcherRead> Fetcher<R> {
                     })?;
                     run_for_each(result).await?;
                 }
-                CsvLineDecision::Skip => continue 'outer,
+                CsvLineDecision::Skip => continue,
             }
         }
 
