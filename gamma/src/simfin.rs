@@ -476,7 +476,7 @@ macro_rules! impl_yearly {
                 ) -> Option<()> {
                     macro_rules! yearly_financial {
                         ($field: ident) => {
-                            out[YearlyField::$field as usize]
+                            out[YearlyField::$field.index()]
                         };
                     }
 
@@ -488,7 +488,7 @@ macro_rules! impl_yearly {
 
                     macro_rules! daily_data {
                         ($field: ident) => {
-                            daily_data_after.index_axis(Axis(1), DailyField::$field as usize)
+                            daily_data_after.index_axis(Axis(1), DailyField::$field.index())
                         };
                     }
 
@@ -506,7 +506,7 @@ macro_rules! impl_daily {
                 fn to_daily(self_data: &HashMap<Self, f32>, mut out: ArrayViewMut1<'_, f32>) -> Option<()> {
                     macro_rules! daily_financial {
                         ($field: ident) => {
-                            out[DailyField::$field as usize]
+                            out[DailyField::$field.index()]
                         };
                     }
 
@@ -539,6 +539,7 @@ macro_rules! derive_fields {
                 Clone,
             )]
             enum $t $body
+            impl IndexEnum for $t {}
             impl Fields for $t {}
         )*
     };

@@ -18,16 +18,22 @@ mod simfin;
 use std::path::{Path, PathBuf};
 
 use chrono::{Datelike, Duration, NaiveDate};
+use serde::de::DeserializeOwned;
 use structopt::StructOpt;
+use tokio::io::AsyncReadExt;
 
 use crate::fetching::Fetch;
-use crate::financials::{Financials, Options};
+use crate::financials::Financials;
 use crate::metrics::v1;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let opt = arg::Options::from_args();
-    setup_logger()?;
+    setup_logger(if opt.debug {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Warn
+    })?;
 
     match opt.mode {
         arg::OperatingMode::ParseSimfin { in_dir, out_dir } => {
@@ -35,27 +41,20 @@ async fn main() -> anyhow::Result<()> {
         }
         arg::OperatingMode::RunV1 {
             repr_dir,
-            buy_date,
-            cash_flows_back,
-            lookahead_years,
-            return_percent: _,
+            options_file,
         } => {
-            let options = Options {
-                yearly_min: buy_date.year() - cash_flows_back as i32,
-                yearly_max: buy_date.year(),
-                daily_min: buy_date - Duration::weeks(52),
-                daily_max: buy_date + Duration::weeks(52 * lookahead_years as i64),
+            let v1_opts: v1::Options = parse_yaml_from_path(&options_file).await?;
+
+            let options = financials::Options {
+                yearly_min: v1_opts.buy_date.year() - v1_opts.cash_flows_back as i32,
+                yearly_max: v1_opts.buy_date.year(),
+                daily_min: v1_opts.buy_date - Duration::weeks(52),
+                daily_max: v1_opts.buy_date + Duration::weeks(52 * v1_opts.lookahead_years as i64),
             };
 
             let financials = Financials::from_path(&repr_dir, options).await?;
 
-            let metrics = v1::Metrics::calculate(
-                &financials,
-                v1::Options {
-                    cash_flows_back: cash_flows_back,
-                    buy_date: buy_date,
-                },
-            )?;
+            let metrics = v1::Metrics::calculate(&financials, v1_opts)?;
 
             let evaluated = metrics.evaluate();
 
@@ -106,21 +105,9 @@ mod arg {
             #[structopt(parse(from_os_str))]
             repr_dir: PathBuf,
 
-            /// The date on which to buy stock.
-            #[structopt(parse(try_from_str = parse_iso_date))]
-            buy_date: NaiveDate,
-
-            /// Number of years back to ensure positive cash flow.
-            #[structopt(long, short, default_value = "3")]
-            cash_flows_back: usize,
-
-            /// Number of years ahead to run analysis for. (backtesting)
-            #[structopt(long, short, default_value = "1")]
-            lookahead_years: usize,
-
-            /// Return percent at which to sell.
-            #[structopt(long, short, default_value = "1.0")]
-            return_percent: f32,
+            /// The options file for V1 metrics in yaml.
+            #[structopt(parse(from_os_str))]
+            options_file: PathBuf,
         },
     }
 
@@ -138,7 +125,17 @@ async fn parse_simfin(in_dir: &Path, out_dir: &Path) -> anyhow::Result<()> {
     repr.save_to_path(out_dir).await
 }
 
-fn setup_logger() -> Result<(), fern::InitError> {
+async fn parse_yaml_from_path<T>(path: &Path) -> anyhow::Result<T>
+where
+    T: DeserializeOwned,
+{
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).await?;
+    Ok(serde_yaml::from_slice(&buf)?)
+}
+
+fn setup_logger(level: log::LevelFilter) -> Result<(), fern::InitError> {
     fern::Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
@@ -149,7 +146,7 @@ fn setup_logger() -> Result<(), fern::InitError> {
                 message
             ))
         })
-        .level(log::LevelFilter::Debug)
+        .level(level)
         .chain(std::io::stdout())
         .apply()?;
     Ok(())

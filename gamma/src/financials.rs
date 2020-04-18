@@ -8,9 +8,10 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 
 use crate::fetching::StorageRepr;
+use crate::util::IndexEnum;
 
 #[repr(usize)]
-#[derive(PartialEq, IntoEnumIterator, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
+#[derive(PartialEq, Eq, IntoEnumIterator, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
 pub enum YearlyField {
     CashShortTermInvestments,
     Ppe,
@@ -24,13 +25,17 @@ pub enum YearlyField {
     CashFlow,
 }
 
+impl IndexEnum for YearlyField {}
+
 #[repr(usize)]
-#[derive(PartialEq, IntoEnumIterator, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
+#[derive(PartialEq, Eq, IntoEnumIterator, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
 pub enum DailyField {
     HighSharePrice,
     LowSharePrice,
     Volume,
 }
+
+impl IndexEnum for DailyField {}
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -63,7 +68,7 @@ pub struct Financials {
     companies: Companies,
     options: Options,
     yearly_data: YearlyData, // Axis(0): year, Axis(1): x::Field, Axis(2): company
-    daily_data: DailyData,  // Axis(0): day, Axis(1): x::Field, Axis(2): company
+    daily_data: DailyData,   // Axis(0): day, Axis(1): x::Field, Axis(2): company
 }
 
 impl Financials {
@@ -161,10 +166,9 @@ impl Financials {
         );
 
         for year in options.yearly_min..=options.yearly_max {
-            let data = repr.yearly.get(&year).ok_or_else(|| InvalidOptionsError(format!(
-                "year {} not found for yearly data",
-                year
-            )))?;
+            let data = repr.yearly.get(&year).ok_or_else(|| {
+                InvalidOptionsError(format!("year {} not found for yearly data", year))
+            })?;
 
             yearly_data
                 .slice_mut(s![(year - options.yearly_min) as usize, .., ..])
@@ -185,10 +189,9 @@ impl Financials {
 
         let mut curr_offset = 0;
         for year in daily_min_year..=daily_max_year {
-            let data = repr.daily.get(&year).ok_or_else(|| InvalidOptionsError(format!(
-                "year {} not found for daily data",
-                year
-            )))?;
+            let data = repr.daily.get(&year).ok_or_else(|| {
+                InvalidOptionsError(format!("year {} not found for daily data", year))
+            })?;
 
             let days_in_year = NaiveDate::from_ymd(year, 12, 31).ordinal() as usize;
 

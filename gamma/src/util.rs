@@ -17,5 +17,10 @@ macro_rules! try_some {
     };
 }
 
-pub trait IndexEnum =
-    IntoEnumIterator + Into<usize> + TryFrom<usize> + Copy + Clone + PartialEq + Eq + Debug;
+pub trait IndexEnum:
+    IntoEnumIterator + Into<usize> + TryFrom<usize> + Copy + Clone + PartialEq + Eq + Debug
+{
+    fn index(&self) -> usize {
+        (*self).into()
+    }
+}

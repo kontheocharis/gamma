@@ -3,12 +3,13 @@ use std::fmt;
 use chrono::{Datelike, NaiveDate};
 use enum_iterator::IntoEnumIterator;
 use log::*;
+use serde::{Serialize, Deserialize};
 use ndarray::prelude::*;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 
-use crate::financials::{Financials, YearlyField, DailyField};
+use crate::financials::{DailyField, Financials, YearlyField};
 use crate::util::IndexEnum;
 
 pub mod v1 {
@@ -21,14 +22,22 @@ pub mod v1 {
         options: Options,
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Options {
-        pub cash_flows_back: usize, // how many years to consider positive cash flow including this one.
         pub buy_date: NaiveDate,
+        pub cash_flows_back: usize, // how many years to consider positive cash flow including this one.
+        pub max_pe_ratio: f32,
+        pub max_debt_to_equity: f32,
+        pub min_potential_roi: f32,
+        pub min_market_cap: f32,
+        pub return_percent: f32,
+        pub lookahead_years: usize,
     }
 
     #[repr(usize)]
-    #[derive(PartialEq, IntoEnumIterator, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
+    #[derive(
+        PartialEq, Eq, IntoEnumIterator, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone,
+    )]
     pub enum Field {
         Cnav1,
         Nav,
@@ -39,6 +48,8 @@ pub mod v1 {
         PotentialRoi,
         MarketCap,
     }
+
+    impl IndexEnum for Field {}
 
     #[derive(Error, Debug)]
     pub enum CalculationError {
@@ -65,14 +76,14 @@ pub mod v1 {
                 ($field: ident, $contents: expr) => {
                     let contents = $contents;
                     metrics
-                        .index_axis_mut(Self::FIELD_AXIS, Field::$field as usize)
+                        .index_axis_mut(Self::FIELD_AXIS, Field::$field.index())
                         .assign(&(contents))
                 };
             }
 
             macro_rules! metric {
                 ($field: ident) => {
-                    &metrics.index_axis(Self::FIELD_AXIS, Field::$field as usize)
+                    &metrics.index_axis(Self::FIELD_AXIS, Field::$field.index())
                 };
             }
 
@@ -80,7 +91,7 @@ pub mod v1 {
                 ($field: ident) => {
                     &financials.yearly().slice(s![
                         financials.year_to_index(year),
-                        YearlyField::$field as usize,
+                        YearlyField::$field.index(),
                         ..
                     ])
                 };
@@ -90,7 +101,7 @@ pub mod v1 {
                 ($field: ident, $date: expr) => {
                     &financials
                         .daily()
-                        .slice(s![$date, DailyField::$field as usize, ..])
+                        .slice(s![$date, DailyField::$field.index(), ..])
                 };
             }
 
@@ -145,7 +156,7 @@ pub mod v1 {
 
                 let yearly = financials.yearly();
                 let cash_flows =
-                    yearly.slice(s![y_start..y_end, YearlyField::CashFlow as usize, ..]);
+                    yearly.slice(s![y_start..y_end, YearlyField::CashFlow.index(), ..]);
 
                 cash_flows.map_axis(Axis(0), |years| {
                     bool_to_f32(years.iter().all(|&flow| flow > 0.0))
@@ -160,7 +171,7 @@ pub mod v1 {
         }
 
         pub fn get_metric(&self, field: Field) -> ArrayView1<'_, f32> {
-            self.data.index_axis(Self::FIELD_AXIS, field as usize)
+            self.data.index_axis(Self::FIELD_AXIS, field.index())
         }
 
         pub fn get_company(&self, company_index: usize) -> ArrayView1<'_, f32> {
@@ -186,11 +197,11 @@ pub mod v1 {
                         None
                     } else {
                         let decision = metric!(Cnav1, i) > metric!(BuySharePrice, i)
-                            && metric!(PeRatio, i) < 15.0
+                            && metric!(PeRatio, i) < self.options.max_pe_ratio
                             && metric!(CashFlows, i) > 0.0
-                            && metric!(DebtToEquityRatio, i) < 1.0
-                            && metric!(PotentialRoi, i) > 2.0
-                            && metric!(MarketCap, i) > 10.0_f32.powf(9.0);
+                            && metric!(DebtToEquityRatio, i) < self.options.max_debt_to_equity
+                            && metric!(PotentialRoi, i) > self.options.min_potential_roi
+                            && metric!(MarketCap, i) > self.options.min_market_cap;
                         Some(decision)
                     }
                 })
