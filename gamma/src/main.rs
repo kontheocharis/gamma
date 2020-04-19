@@ -12,6 +12,7 @@ mod mock;
 mod simfin;
 
 use std::path::{Path, PathBuf};
+use std::time::{Instant};
 
 use chrono::{Datelike, Duration, NaiveDate};
 use log::*;
@@ -57,10 +58,11 @@ async fn main() -> anyhow::Result<()> {
             let financials = Financials::from_path(&repr_dir, fin_opts).await?;
 
             info!("Fetched financials");
+            let now = Instant::now();
 
             let metrics = v1::Metrics::calculate(&financials, v1_opts)?;
 
-            info!("Calculated metrics");
+            info!("Calculated metrics in {}", now.elapsed().as_nanos());
 
             let evaluated = metrics.evaluate();
             let backtracked = evaluated.backtrack();
@@ -152,7 +154,7 @@ fn print_v1_results(
     let total_successful = stats.n_reached_percent + stats.n_gain_at_end;
     let successful_pct = (total_successful as f32 / companies_investable as f32) * 100.0;
 
-    println!("-- RESULTS for buy date {} --", buy_date.format("%d %B %Y"));
+    println!("RESULTS for buy date {}", buy_date.format("%d %B %Y"));
     println!("Total companies considered: {},", companies_considered);
 
     println!("Companies with sufficient data: {},", companies_sufficient);
