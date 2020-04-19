@@ -209,11 +209,11 @@ impl Financials {
 
             daily_data
                 .slice_mut(s![
-                    (curr_offset)..(curr_offset + (day_max - day_min) + 1),
+                    (curr_offset)..=(curr_offset + (day_max - day_min)),
                     ..,
                     ..,
                 ])
-                .assign(&data.slice(s![day_min..(day_max + 1), .., ..]));
+                .assign(&data.slice(s![day_min..=(day_max), .., ..]));
 
             curr_offset += day_max - day_min + 1;
         }

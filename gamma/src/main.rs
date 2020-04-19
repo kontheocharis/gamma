@@ -1,10 +1,6 @@
 #![allow(dead_code)]
 #![feature(async_closure)]
 #![feature(trait_alias)]
-#![feature(nll)]
-
-// #[macro_use]
-// extern crate gamma_derive;
 
 #[macro_use]
 mod util;
@@ -18,6 +14,7 @@ mod simfin;
 use std::path::{Path, PathBuf};
 
 use chrono::{Datelike, Duration, NaiveDate};
+use log::*;
 use serde::de::DeserializeOwned;
 use structopt::StructOpt;
 use tokio::io::AsyncReadExt;
@@ -45,26 +42,30 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let v1_opts: v1::Options = parse_yaml_from_path(&options_file).await?;
 
-            let options = financials::Options {
+            info!("Using V1 options: {:#?}", &v1_opts);
+
+            let fin_opts = financials::Options {
                 yearly_min: v1_opts.buy_date.year() - v1_opts.cash_flows_back as i32,
                 yearly_max: v1_opts.buy_date.year(),
                 daily_min: v1_opts.buy_date - Duration::weeks(52),
                 daily_max: v1_opts.buy_date + Duration::weeks(52 * v1_opts.lookahead_years as i64),
             };
 
-            let financials = Financials::from_path(&repr_dir, options).await?;
+            info!("Using financials options: {:#?}", &fin_opts);
+
+            let financials = Financials::from_path(&repr_dir, fin_opts).await?;
+
+            info!("Fetched financials");
 
             let metrics = v1::Metrics::calculate(&financials, v1_opts)?;
 
-            let evaluated = metrics.evaluate();
+            info!("Calculated metrics");
 
-            println!(
-                "Result: {:?}",
-                evaluated
-                    .companies_investable()
-                    .map(|i| financials.index_to_company(i))
-                    .collect::<Vec<_>>()
-            );
+            let evaluated = metrics.evaluate();
+            let backtracked = evaluated.backtrack();
+            let stats = backtracked.stats();
+
+            print_v1_results(&financials, &evaluated, &backtracked, &stats);
 
             Ok(())
         }
@@ -133,6 +134,73 @@ where
     let mut buf = Vec::new();
     file.read_to_end(&mut buf).await?;
     Ok(serde_yaml::from_slice(&buf)?)
+}
+
+fn print_v1_results(
+    financials: &Financials,
+    evaluated: &v1::Evaluated,
+    _backtracked: &v1::Backtracked,
+    stats: &v1::BacktrackStatistics,
+) {
+    let companies_considered = financials.companies().len();
+
+    let companies_sufficient = evaluated.companies_sufficient().count();
+    let companies_investable = evaluated.companies_investable().count();
+
+    let total_successful = stats.n_reached_percent + stats.n_gain_at_end;
+    let successful_pct = (total_successful as f32 / companies_investable as f32) * 100.0;
+
+    println!("RESULTS:");
+    println!("Total companies considered: {},", companies_considered);
+
+    println!("Companies with sufficient data: {},", companies_sufficient);
+
+    if companies_sufficient == 0 {
+        // No point in printing anything else.
+        println!("Insufficient data to continue.");
+        return;
+    }
+
+    println!(
+        "Companies that were deemed investable: {} ({:.2}% of sufficient),",
+        companies_investable,
+        (companies_investable as f32 / companies_sufficient as f32) * 100.0,
+    );
+
+    if companies_investable == 0 {
+        // no point in printing anything else.
+        println!("Insufficient data to continue.");
+        return;
+    }
+
+    println!(
+        "Companies that yielded return percent: {} ({:.2}% of investable),",
+        stats.n_reached_percent,
+        (stats.n_reached_percent as f32 / companies_investable as f32) * 100.0,
+    );
+    println!(
+        "Companies that only increased in price: {} ({:.2}% of investable),",
+        stats.n_gain_at_end,
+        (stats.n_gain_at_end as f32 / companies_investable as f32) * 100.0
+    );
+    println!(
+        "Companies that decreased in price: {} ({:.2}% of investable),",
+        stats.n_loss_at_end,
+        (stats.n_loss_at_end as f32 / companies_investable as f32) * 100.0
+    );
+
+    println!(
+        "Total successful predictions: {} ({:.2}% of investable),",
+        total_successful, successful_pct
+    );
+    println!(
+        "Overall: {}",
+        if successful_pct > 50.0 {
+            "GAIN"
+        } else {
+            "LOSS"
+        }
+    );
 }
 
 fn setup_logger(level: log::LevelFilter) -> Result<(), fern::InitError> {
