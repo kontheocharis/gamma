@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::hash::Hash;
@@ -13,7 +14,6 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 use tokio::fs::File;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
-use tokio::sync::Mutex;
 use tokio::try_join;
 
 use crate::fetching::{DailyMap, Fetch, StorageRepr, YearlyMap};
@@ -43,15 +43,15 @@ pub struct Fetcher<R> {
     companies: R,
 }
 
-#[async_trait]
+#[async_trait(?Send)]
 impl<R: FetcherRead> Fetch for Fetcher<R> {
     type StorageReprError = anyhow::Error;
 
     async fn to_storage_repr(&mut self) -> anyhow::Result<StorageRepr> {
         let companies = Fetcher::parse_company_csv(&mut self.companies, COMPANIES_FILENAME).await?;
 
-        let yearly_map = Mutex::new(YearlyMap::new());
-        let daily_map = Mutex::new(DailyMap::new());
+        let yearly_map = RefCell::new(YearlyMap::new());
+        let daily_map = RefCell::new(DailyMap::new());
 
         macro_rules! parse_csv {
             (
@@ -366,16 +366,16 @@ where
 
 async fn handle_yearly_result<F>(
     parse_result: ParseResult<F>,
-    yearly_map: &Mutex<YearlyMap>,
-    daily_map: &Mutex<DailyMap>,
+    yearly_map: &RefCell<YearlyMap>,
+    daily_map: &RefCell<DailyMap>,
     companies: &Companies,
     sheet_name: &str,
 ) -> anyhow::Result<()>
 where
     F: YearlyFields,
 {
-    let mut yearly_map = yearly_map.lock().await;
-    let daily_map = daily_map.lock().await;
+    let mut yearly_map = yearly_map.borrow_mut();
+    let daily_map = daily_map.borrow();
 
     let yearly_array = yearly_map
         .entry(parse_result.classifying_year)
@@ -408,14 +408,14 @@ where
 
 async fn handle_daily_result<F>(
     parse_result: ParseResult<F>,
-    daily_map: &Mutex<DailyMap>,
+    daily_map: &RefCell<DailyMap>,
     companies: &Companies,
     sheet_name: &str,
 ) -> anyhow::Result<()>
 where
     F: DailyFields,
 {
-    let mut daily_map = daily_map.lock().await;
+    let mut daily_map = daily_map.borrow_mut();
 
     let array = daily_map
         .entry(parse_result.classifying_year)

@@ -142,7 +142,6 @@ impl Financials {
     ) -> anyhow::Result<Financials> {
         let path = path.as_ref();
         options.ensure_ok()?;
-
         let repr = StorageRepr::load_from_path(
             path,
             (options.yearly_min, options.yearly_max),

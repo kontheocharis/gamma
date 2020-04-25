@@ -15,7 +15,7 @@ struct MockFetcher;
 #[error("Mock error")]
 struct MockFetcherError;
 
-#[async_trait]
+#[async_trait(?Send)]
 impl Fetch for MockFetcher {
     type StorageReprError = MockFetcherError;
 

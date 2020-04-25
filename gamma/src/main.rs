@@ -12,7 +12,7 @@ mod mock;
 mod simfin;
 
 use std::path::{Path, PathBuf};
-use std::time::{Instant};
+use std::time::Instant;
 
 use chrono::{Datelike, Duration, NaiveDate};
 use log::*;

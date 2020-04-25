@@ -28,7 +28,7 @@ pub type DailyMap = HashMap<i32, Array3<f32>>;
 pub struct StorageRepr {
     pub companies: Companies,
     pub yearly: YearlyMap, // Axis(0): Columns, Axis(1): Companies
-    pub daily: DailyMap, // Axis(0): 0-365 or 0-364, Axis(1): Columns, Axis(2): Companies
+    pub daily: DailyMap,   // Axis(0): 0-365 or 0-364, Axis(1): Columns, Axis(2): Companies
 }
 
 #[derive(Error, Debug)]
@@ -94,10 +94,7 @@ impl StorageRepr {
             .iter()
             .map(|(year, array)| (year, bincode::serialize(array), DAILY_FOLDER));
 
-        let company_file = (
-            path.join(COMPANY_FILE),
-            bincode::serialize(&self.companies),
-        );
+        let company_file = (path.join(COMPANY_FILE), bincode::serialize(&self.companies));
 
         FuturesUnordered::from_iter(
             yearly_iter
@@ -121,7 +118,7 @@ impl StorageRepr {
 #[error("Fetch error: {0}")]
 pub struct FetchError<T: Display + Debug>(T);
 
-#[async_trait]
+#[async_trait(?Send)]
 pub trait Fetch {
     type StorageReprError: Display + Debug + Send + Sync + 'static;
 
