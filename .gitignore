@@ -30,6 +30,12 @@ __pycache__/
 # C extensions
 *.so
 
+# --- RUST (gamma) ---
+/gamma/target/
+/gamma/testing/
+Cargo.lock
+**/*.rs.bk
+
 # Distribution / packaging
 .Python
 build/
