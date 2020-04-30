@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use chrono::{Datelike, Duration, NaiveDate};
+use chrono::{Datelike, NaiveDate};
 use enum_iterator::IntoEnumIterator;
 use log::*;
 use ndarray::prelude::*;
@@ -22,17 +22,31 @@ pub mod v1 {
         options: Options,
     }
 
+    #[derive(Error, Debug)]
+    #[error("one or more options are invalid")]
+    pub struct OptionsError;
+
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Options {
         pub buy_date: NaiveDate,
+        pub sell_date: NaiveDate,
         pub cash_flows_back: usize, // how many years to consider positive cash flow including this one.
         pub max_pe_ratio: f32,
         pub max_debt_to_equity: f32,
         pub min_potential_roi: f32,
         pub min_market_cap: f32,
         pub return_percent: f32,
-        pub lookahead_years: usize,
         pub ignore_cnav_cmp: bool,
+    }
+
+    impl Options {
+        fn verify(&self) -> Result<(), OptionsError> {
+            if self.buy_date >= self.sell_date {
+                Err(OptionsError)
+            } else {
+                Ok(())
+            }
+        }
     }
 
     #[repr(usize)]
@@ -65,7 +79,8 @@ pub mod v1 {
         pub fn calculate(
             financials: &'a Financials,
             options: Options,
-        ) -> Result<Self, CalculationError> {
+        ) -> anyhow::Result<Self> {
+            options.verify()?;
             let mut metrics = Array2::from_elem(
                 (Field::VARIANT_COUNT, financials.companies().len()),
                 f32::NAN,
@@ -150,7 +165,7 @@ pub mod v1 {
                 let year_i = financials.year_to_index(year);
 
                 if year_i < options.cash_flows_back {
-                    return Err(CalculationError::InsufficientCashFlowData);
+                    return Err(CalculationError::InsufficientCashFlowData.into());
                 }
 
                 let (y_start, y_end) = (year_i - options.cash_flows_back, year_i + 1);
@@ -238,7 +253,7 @@ pub mod v1 {
     }
 
     impl Evaluated<'_> {
-        pub fn companies_sufficient<'a>(&'a self) -> impl Iterator<Item=usize> + 'a {
+        pub fn companies_sufficient<'a>(&'a self) -> impl Iterator<Item = usize> + 'a {
             self.data
                 .iter()
                 .enumerate()
@@ -259,10 +274,7 @@ pub mod v1 {
                 .companies_investable()
                 .map(|company_index| {
                     let date_start = self.financials.date_to_index(self.options.buy_date);
-                    let date_end = self.financials.date_to_index(
-                        self.options.buy_date
-                            + Duration::weeks(52 * self.options.lookahead_years as i64),
-                    );
+                    let date_end = self.financials.date_to_index(self.options.sell_date);
 
                     let data = self.financials.daily().slice(s![
                         date_start..=date_end,

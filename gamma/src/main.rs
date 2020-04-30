@@ -43,6 +43,7 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let v1_opts: v1::Options = parse_yaml_from_path(&options_file).await?;
             let buy_date = v1_opts.buy_date;
+            let sell_date = v1_opts.sell_date;
 
             info!("Using V1 options: {:#?}", &v1_opts);
 
@@ -50,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
                 yearly_min: buy_date.year() - v1_opts.cash_flows_back as i32,
                 yearly_max: buy_date.year(),
                 daily_min: buy_date - Duration::weeks(52),
-                daily_max: buy_date + Duration::weeks(52 * v1_opts.lookahead_years as i64),
+                daily_max: sell_date,
             };
 
             info!("Using financials options: {:#?}", &fin_opts);
@@ -68,7 +69,14 @@ async fn main() -> anyhow::Result<()> {
             let backtracked = evaluated.backtrack();
             let stats = backtracked.stats();
 
-            print_v1_results(buy_date, &financials, &evaluated, &backtracked, &stats);
+            print_v1_results(
+                buy_date,
+                sell_date,
+                &financials,
+                &evaluated,
+                &backtracked,
+                &stats,
+            );
 
             Ok(())
         }
@@ -141,6 +149,7 @@ where
 
 fn print_v1_results(
     buy_date: NaiveDate,
+    sell_date: NaiveDate,
     financials: &Financials,
     evaluated: &v1::Evaluated,
     _backtracked: &v1::Backtracked,
@@ -154,7 +163,11 @@ fn print_v1_results(
     let total_successful = stats.n_reached_percent + stats.n_gain_at_end;
     let successful_pct = (total_successful as f32 / companies_investable as f32) * 100.0;
 
-    println!("RESULTS for buy date {}", buy_date.format("%d %B %Y"));
+    println!(
+        "RESULTS for investment: {} to {}",
+        buy_date.format("%d %B %Y"),
+        sell_date.format("%d %B %Y")
+    );
     println!("Total companies considered: {},", companies_considered);
 
     println!("Companies with sufficient data: {},", companies_sufficient);
