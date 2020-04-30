@@ -19,7 +19,7 @@
 cache/
 .DS_Store
 data_dir/
-.tags
+.tags*
 .proj-root
 
 # --- PYTHON ---
