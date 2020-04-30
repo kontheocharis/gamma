@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use chrono::{Datelike, NaiveDate};
 use enum_iterator::IntoEnumIterator;
 use futures::prelude::*;
-use ndarray::{s, Array2, Array3, ArrayView2, ArrayViewMut1, Axis};
+use ndarray::prelude::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 use tokio::fs::File;

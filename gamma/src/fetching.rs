@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use futures::prelude::*;
 use futures::stream::{FuturesUnordered, StreamExt, TryStreamExt};
-use ndarray::{Array2, Array3};
+use ndarray::prelude::*;
 use thiserror::Error;
 use tokio::fs::{self, File};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

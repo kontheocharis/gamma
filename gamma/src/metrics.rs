@@ -4,7 +4,6 @@ use chrono::{Datelike, NaiveDate};
 use enum_iterator::IntoEnumIterator;
 use log::*;
 use ndarray::prelude::*;
-use ndarray::{Array1, Array2, ArrayView1, ArrayView2, Axis};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

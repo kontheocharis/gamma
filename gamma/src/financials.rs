@@ -3,7 +3,7 @@ use std::path::Path;
 
 use chrono::{Datelike, NaiveDate};
 use enum_iterator::IntoEnumIterator;
-use ndarray::{s, Array3, Axis};
+use ndarray::prelude::*;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 
