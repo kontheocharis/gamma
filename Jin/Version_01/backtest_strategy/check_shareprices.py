@@ -36,7 +36,7 @@ class check_shareprices(object):
       self.array_buy_shareprices = array_buy_shareprices
 
       # Get the date range (ie no of days between buy and sell dates)
-      days_inbetween = (self.sell_date - self.buy_date).days
+      days_inbetween = (self.sell_date - self.buy_date).days + 1
 
       # Get temporary date index of matrix, of buy date (to start from), which I will increase in the iteration
       temp_buy_date_index = (self.buy_date - self.matrix_start_date).days
@@ -52,7 +52,7 @@ class check_shareprices(object):
           
       for i in range(len(self.array_company_index_of_matrix)):
         
-        # Iterate through every company that there is sufficent data for
+        # Iterate through every company (that met criteria)
         temp_company_index = int( self.array_company_index_of_matrix[i] )
         temp_buy_share_price = array_buy_shareprices[i]
         does_shareprice_increase = False
@@ -60,8 +60,13 @@ class check_shareprices(object):
 
         # Check if there is a 100% gain in shareprice for every company
         for j in range(days_inbetween):
-                  
-            if self.matrix[temp_buy_date_index + j][temp_company_index] > (2 * temp_buy_share_price):
+
+            
+            if np.isnan( self.matrix[temp_buy_date_index + j][temp_company_index] ) == True:  # Don't need to write == True, since the if statement implies that already
+              continue
+            
+            
+            if self.matrix[temp_buy_date_index + j][temp_company_index] > (2 * temp_buy_share_price):   # If there is no data for a date, it'll be NaN
                   
               # If there is a 100% gain in shareprice, return arrays of company names, company index & date index
               self.array_company_names_with_shareprices_gain.append( array_company_names_that_pass_criteria[i] )                

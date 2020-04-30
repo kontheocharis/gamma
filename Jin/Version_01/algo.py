@@ -178,5 +178,5 @@ def algo(matrix_start_date, buy_date, sell_date):
 
 
 
-algo( date(2007, 1, 3), date(2011, 5, 6), date(2013, 5, 7) )
+algo( date(2007, 1, 3), date(2011, 3, 10), date(2015, 3, 10) )
 

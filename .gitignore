@@ -1,6 +1,19 @@
-# Jin --- CUSTOM ---
-data_simfin/
-**/Jin/Version_03/create_empty_matrix/daily_shareprices.pkl
+# --- JIN Version_03 ---
+**/Jin/Version_01/income.pkl
+**/Jin/Version_01/balance.pkl
+**/Jin/Version_01/cashflow.pkl
+**/Jin/Version_01/daily_shareprices.pkl
+**/Jin/Version_01/companytickers.pkl
+
+**/Jin/Version_01/dict_df_statement_index.json
+**/Jin/Version_01/dict_company_index_matrix.json
+**/Jin/Version_01/matrix.pkl
+
+**/Jin/Version_01/income.xlsx
+**/Jin/Version_01/balance.xlsx
+**/Jin/Version_01/cashflow.xlsx
+**/Jin/Version_01/daily_shareprices.xlsx
+**/Jin/Version_01/companytickers.xlsx
 
 # --- CUSTOM ---
 cache/
