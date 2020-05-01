@@ -21,9 +21,8 @@ const YEARLY_FOLDER: &str = "yearly";
 const DAILY_FOLDER: &str = "daily";
 const COMPANY_FILE: &str = "companies";
 
-pub type YearIndex = i32;
-pub type YearlyMap = HashMap<YearIndex, Array2<f32>>;
-pub type DailyMap = HashMap<YearIndex, Array3<f32>>;
+pub type YearlyMap = HashMap<i32, Array2<f32>>;
+pub type DailyMap = HashMap<i32, Array3<f32>>;
 
 #[derive(Debug)]
 pub struct StorageRepr {
@@ -48,8 +47,8 @@ pub struct InvalidYearFilenameError;
 impl StorageRepr {
     pub async fn load_from_path<P: AsRef<Path>>(
         path: P,
-        yearly_years: (YearIndex, YearIndex),
-        daily_years: (YearIndex, YearIndex),
+        yearly_years: (i32, i32),
+        daily_years: (i32, i32),
     ) -> anyhow::Result<StorageRepr> {
         let path = path.as_ref();
 
