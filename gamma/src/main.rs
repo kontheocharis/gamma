@@ -11,6 +11,7 @@ mod metrics;
 mod mock;
 mod simfin;
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -22,7 +23,6 @@ use tokio::io::AsyncReadExt;
 
 use crate::fetching::Fetch;
 use crate::financials::Financials;
-use crate::metrics::v1;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -37,18 +37,18 @@ async fn main() -> anyhow::Result<()> {
         arg::OperatingMode::ParseSimfin { in_dir, out_dir } => {
             parse_simfin(&in_dir, &out_dir).await
         }
-        arg::OperatingMode::RunV1 {
+        arg::OperatingMode::Run {
             repr_dir,
             options_file,
         } => {
-            let v1_opts: v1::Options = parse_yaml_from_path(&options_file).await?;
-            let buy_date = v1_opts.buy_date;
-            let sell_date = v1_opts.sell_date;
+            let metrics_opts: metrics::Options = parse_yaml_from_path(&options_file).await?;
+            let buy_date = metrics_opts.buy_date;
+            let sell_date = metrics_opts.sell_date;
 
-            info!("Using V1 options: {:#?}", &v1_opts);
+            info!("Using metrics options: {:#?}", &metrics_opts);
 
             let fin_opts = financials::Options {
-                yearly_min: buy_date.year() - v1_opts.cash_flows_back as i32,
+                yearly_min: buy_date.year() - metrics_opts.cash_flows_back as i32,
                 yearly_max: buy_date.year(),
                 daily_min: buy_date - Duration::weeks(52),
                 daily_max: sell_date,
@@ -60,22 +60,27 @@ async fn main() -> anyhow::Result<()> {
             let financials = Financials::from_path(&repr_dir, fin_opts).await?;
             info!("Loaded financials in {:.2?}", financials_time.elapsed());
 
+            let metrics_bounds = metrics::Bounds::from_legacy_options(&metrics_opts);
+
             let metrics_time = Instant::now();
-            let metrics = v1::Metrics::calculate(&financials, v1_opts)?;
+            let metrics = metrics::Metrics::calculate(&financials, metrics_opts)?;
             info!("Calculated metrics in {:.2?}", metrics_time.elapsed());
 
-            let evaluated = metrics.evaluate();
+            let evaluator = metrics::Evaluator::new(&metrics);
+
+            let ignore_fields = HashSet::new();
+            let evaluated = evaluator.evaluate(metrics_bounds, &ignore_fields);
             let backtracked = evaluated.backtrack();
             let stats = backtracked.stats();
 
             info!(
                 "Companies which reached return percent: {:#?}",
                 backtracked
-                    .companies_which(v1::BacktrackResult::ReachedReturnPercent)
+                    .companies_which(metrics::BacktrackResult::ReachedReturnPercent)
                     .map(|(i, price)| format!(
                         "{}: {:.2} to {:.2}",
                         financials.index_to_company(i),
-                        metrics.get_metric(v1::Field::BuySharePrice)[i],
+                        metrics.get_metric(metrics::Field::BuySharePrice)[i],
                         price,
                     ))
                     .collect::<Vec<_>>()
@@ -84,17 +89,17 @@ async fn main() -> anyhow::Result<()> {
             info!(
                 "Companies which gained in the end: {:#?}",
                 backtracked
-                    .companies_which(v1::BacktrackResult::GainAtEnd)
+                    .companies_which(metrics::BacktrackResult::GainAtEnd)
                     .map(|(i, price)| format!(
                         "{}: {:.2} to {:.2}",
                         financials.index_to_company(i),
-                        metrics.get_metric(v1::Field::BuySharePrice)[i],
+                        metrics.get_metric(metrics::Field::BuySharePrice)[i],
                         price,
                     ))
                     .collect::<Vec<_>>()
             );
 
-            print_v1_results(
+            print_results(
                 buy_date,
                 sell_date,
                 &financials,
@@ -136,13 +141,13 @@ mod arg {
             out_dir: PathBuf,
         },
 
-        /// Run v1 analysis.
-        RunV1 {
+        /// Run analysis.
+        Run {
             /// The directory containing the parsed representation.
             #[structopt(parse(from_os_str))]
             repr_dir: PathBuf,
 
-            /// The options file for V1 metrics in yaml.
+            /// The options file for metrics in yaml.
             #[structopt(parse(from_os_str))]
             options_file: PathBuf,
         },
@@ -172,13 +177,13 @@ where
     Ok(serde_yaml::from_slice(&buf)?)
 }
 
-fn print_v1_results(
+fn print_results(
     buy_date: NaiveDate,
     sell_date: NaiveDate,
     financials: &Financials,
-    evaluated: &v1::Evaluated,
-    _backtracked: &v1::Backtracked,
-    stats: &v1::BacktrackStatistics,
+    evaluated: &metrics::Evaluated,
+    _backtracked: &metrics::Backtracked,
+    stats: &metrics::BacktrackStatistics,
 ) {
     let companies_considered = financials.companies().len();
 
