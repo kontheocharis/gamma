@@ -24,3 +24,5 @@ pub trait IndexEnum:
         (*self).into()
     }
 }
+
+pub type CompanyId = usize;

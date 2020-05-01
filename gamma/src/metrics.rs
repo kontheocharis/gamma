@@ -8,8 +8,10 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::financials::{Companies, DailyField, Financials, YearlyField};
-use crate::util::IndexEnum;
+use crate::financials::{
+    Companies, DailyField, Financials, YearlyField,
+};
+use crate::util::{IndexEnum, CompanyId};
 
 pub mod v1 {
     use super::*;
@@ -75,10 +77,7 @@ pub mod v1 {
         pub const FIELD_AXIS: Axis = Axis(0);
         pub const COMPANY_AXIS: Axis = Axis(1);
 
-        pub fn calculate(
-            financials: &'a Financials,
-            options: Options,
-        ) -> anyhow::Result<Self> {
+        pub fn calculate(financials: &'a Financials, options: Options) -> anyhow::Result<Self> {
             options.verify()?;
             let mut metrics = Array2::from_elem(
                 (Field::VARIANT_COUNT, financials.companies().len()),
@@ -189,7 +188,7 @@ pub mod v1 {
             self.data.index_axis(Self::FIELD_AXIS, field.index())
         }
 
-        pub fn get_company(&self, company_index: usize) -> ArrayView1<'_, f32> {
+        pub fn get_company(&self, company_index: CompanyId) -> ArrayView1<'_, f32> {
             self.data.index_axis(Self::COMPANY_AXIS, company_index)
         }
 
@@ -213,6 +212,7 @@ pub mod v1 {
                     } else {
                         let decision = (self.options.ignore_cnav_cmp
                             || metric!(Cnav1, i) > metric!(BuySharePrice, i))
+                            && metric!(Cnav1, i) < metric!(Nav, i)
                             && metric!(CashFlows, i) > 0.0
                             && metric!(DebtToEquityRatio, i) < self.options.max_debt_to_equity
                             && metric!(PotentialRoi, i) > self.options.min_potential_roi
@@ -252,7 +252,7 @@ pub mod v1 {
     }
 
     impl Evaluated<'_> {
-        pub fn companies_sufficient<'a>(&'a self) -> impl Iterator<Item = usize> + 'a {
+        pub fn companies_sufficient<'a>(&'a self) -> impl Iterator<Item = CompanyId> + 'a {
             self.data
                 .iter()
                 .enumerate()
@@ -260,7 +260,7 @@ pub mod v1 {
                 .map(|(company_index, _)| company_index)
         }
 
-        pub fn companies_investable<'a>(&'a self) -> impl Iterator<Item = usize> + 'a {
+        pub fn companies_investable<'a>(&'a self) -> impl Iterator<Item = CompanyId> + 'a {
             self.data
                 .iter()
                 .enumerate()
@@ -283,19 +283,20 @@ pub mod v1 {
 
                     let buy_price = self.metrics.get_metric(Field::BuySharePrice)[company_index];
 
-                    let result = data
+                    let result_tup = data
                         .iter()
                         .find(|&&price| price >= buy_price * (1.0 + self.options.return_percent))
-                        .map(|_| BacktrackResult::ReachedReturnPercent)
+                        .map(|&price| (price, BacktrackResult::ReachedReturnPercent))
                         .unwrap_or_else(|| {
-                            if *data.iter().last().unwrap() > buy_price {
-                                BacktrackResult::GainAtEnd
+                            let last_price = *data.iter().last().unwrap();
+                            if last_price > buy_price {
+                                (last_price, BacktrackResult::GainAtEnd)
                             } else {
-                                BacktrackResult::LossAtEnd
+                                (last_price, BacktrackResult::LossAtEnd)
                             }
                         });
 
-                    (company_index, result)
+                    (company_index, result_tup)
                 })
                 .collect();
 
@@ -315,7 +316,7 @@ pub mod v1 {
 
     #[derive(Debug)]
     pub struct Backtracked<'a> {
-        data: HashMap<usize, BacktrackResult>,
+        data: HashMap<CompanyId, (f32, BacktrackResult)>,
         companies: &'a Companies,
     }
 
@@ -328,9 +329,9 @@ pub mod v1 {
 
     impl Backtracked<'_> {
         pub fn stats(&self) -> BacktrackStatistics {
-            self.data
-                .values()
-                .fold(BacktrackStatistics::default(), |acc, res| match res {
+            self.data.values().map(|(_, result)| result).fold(
+                BacktrackStatistics::default(),
+                |acc, res| match res {
                     BacktrackResult::ReachedReturnPercent => BacktrackStatistics {
                         n_reached_percent: acc.n_reached_percent + 1,
                         ..acc
@@ -343,6 +344,22 @@ pub mod v1 {
                         n_loss_at_end: acc.n_loss_at_end + 1,
                         ..acc
                     },
+                },
+            )
+        }
+
+        pub fn companies_which<'a>(
+            &'a self,
+            condition: BacktrackResult,
+        ) -> impl Iterator<Item = (CompanyId, f32)> + 'a {
+            self.data
+                .iter()
+                .filter_map(move |(&company_idx, &(price, result))| {
+                    if result == condition {
+                        Some((company_idx, price))
+                    } else {
+                        None
+                    }
                 })
         }
     }

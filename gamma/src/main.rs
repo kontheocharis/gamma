@@ -56,18 +56,43 @@ async fn main() -> anyhow::Result<()> {
 
             info!("Using financials options: {:#?}", &fin_opts);
 
+            let financials_time = Instant::now();
             let financials = Financials::from_path(&repr_dir, fin_opts).await?;
+            info!("Loaded financials in {:.2?}", financials_time.elapsed());
 
-            info!("Fetched financials");
-            let now = Instant::now();
-
+            let metrics_time = Instant::now();
             let metrics = v1::Metrics::calculate(&financials, v1_opts)?;
-
-            info!("Calculated metrics in {}", now.elapsed().as_nanos());
+            info!("Calculated metrics in {:.2?}", metrics_time.elapsed());
 
             let evaluated = metrics.evaluate();
             let backtracked = evaluated.backtrack();
             let stats = backtracked.stats();
+
+            info!(
+                "Companies which reached return percent: {:#?}",
+                backtracked
+                    .companies_which(v1::BacktrackResult::ReachedReturnPercent)
+                    .map(|(i, price)| format!(
+                        "{}: {:.2} to {:.2}",
+                        financials.index_to_company(i),
+                        metrics.get_metric(v1::Field::BuySharePrice)[i],
+                        price,
+                    ))
+                    .collect::<Vec<_>>()
+            );
+
+            info!(
+                "Companies which gained in the end: {:#?}",
+                backtracked
+                    .companies_which(v1::BacktrackResult::GainAtEnd)
+                    .map(|(i, price)| format!(
+                        "{}: {:.2} to {:.2}",
+                        financials.index_to_company(i),
+                        metrics.get_metric(v1::Field::BuySharePrice)[i],
+                        price,
+                    ))
+                    .collect::<Vec<_>>()
+            );
 
             print_v1_results(
                 buy_date,

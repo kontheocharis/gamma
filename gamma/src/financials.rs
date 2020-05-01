@@ -8,7 +8,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 
 use crate::fetching::StorageRepr;
-use crate::util::IndexEnum;
+use crate::util::{IndexEnum, CompanyId};
 
 #[repr(usize)]
 #[derive(PartialEq, Eq, IntoEnumIterator, Debug, IntoPrimitive, TryFromPrimitive, Copy, Clone)]
@@ -59,7 +59,7 @@ impl Options {
     }
 }
 
-pub type Companies = HashMap<String, usize>;
+pub type Companies = HashMap<String, CompanyId>;
 pub type YearlyData = Array3<f32>;
 pub type DailyData = Array3<f32>;
 
@@ -104,11 +104,11 @@ impl Financials {
         (date.num_days_from_ce() - self.options.daily_min.num_days_from_ce()) as usize
     }
 
-    pub fn company_to_index(&self, company: &str) -> usize {
+    pub fn company_to_index(&self, company: &str) -> CompanyId {
         *self.companies.get(company).unwrap()
     }
 
-    pub fn index_to_company(&self, index: usize) -> &str {
+    pub fn index_to_company(&self, index: CompanyId) -> &str {
         self.companies
             .iter()
             .find_map(|(k, &v)| if v == index { Some(k.as_ref()) } else { None })
@@ -161,7 +161,7 @@ impl Financials {
                 YearlyField::VARIANT_COUNT,
                 no_of_companies,
             ),
-            std::f32::NAN,
+            f32::NAN,
         );
 
         for year in options.yearly_min..=options.yearly_max {
@@ -181,7 +181,7 @@ impl Financials {
                 DailyField::VARIANT_COUNT,
                 no_of_companies,
             ),
-            std::f32::NAN,
+            f32::NAN,
         );
 
         let (daily_min_year, daily_max_year) = (options.daily_min.year(), options.daily_max.year());

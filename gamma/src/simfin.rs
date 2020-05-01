@@ -18,7 +18,7 @@ use tokio::try_join;
 
 use crate::fetching::{DailyMap, Fetch, StorageRepr, YearlyMap};
 use crate::financials::{Companies, DailyField, YearlyField};
-use crate::util::IndexEnum;
+use crate::util::{IndexEnum, CompanyId};
 
 const BALANCE_SHEET_FILENAME: &str = "us-balance-annual.csv";
 const CASH_FLOW_FILENAME: &str = "us-cashflow-annual.csv";
@@ -185,7 +185,7 @@ struct ParseOptions<'a, F> {
 
 #[derive(Debug)]
 struct ParseResult<F> {
-    pub company_index: usize,
+    pub company_index: CompanyId,
     pub entry_date: NaiveDate,
     pub classifying_year: i32,
     pub data: HashMap<F, f32>,
@@ -282,7 +282,7 @@ enum CsvLineDecision<F> {
 
 #[derive(Debug)]
 struct CsvLineOutcome<F> {
-    company_index: Option<usize>,
+    company_index: Option<CompanyId>,
     entry_date: Option<NaiveDate>,
     classifying_year: Option<i32>,
     data: HashMap<F, f32>,
