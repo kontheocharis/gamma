@@ -10,6 +10,7 @@ mod financials;
 mod metrics;
 mod mock;
 mod simfin;
+// mod nnet;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
